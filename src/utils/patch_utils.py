@@ -227,11 +227,9 @@ def process_patches(
     return vertices, patches
 
 
-def process_FoldNet_patches(
+def make_patches(
     params,
-    vertex_idxs,
-    face_idxs,
-    vertex_t
+    face_idx
 ):
     """
     Process all junction curves to compute explicit patch control points.
@@ -239,7 +237,7 @@ def process_FoldNet_patches(
     """
     
     vertices = params.clone()
-    patches = vertices[:, face_idxs]
+    patches = vertices[:, face_idx]
     return vertices, patches
 
 

@@ -23,6 +23,7 @@ def load_template(file_path):
         vertex_idxs[i] = [len(parameters), len(parameters)+1, len(parameters)+2]
         parameters.extend([float(a), float(b), float(c)])
     parameters = torch.tensor(parameters).squeeze()
+    vertex_idxs = torch.from_numpy(vertex_idxs.astype(np.int64))
 
     # faces
     face_idxs = np.empty([len(topology), len(topology[0])])
@@ -56,6 +57,7 @@ def load_template(file_path):
         xs.append(int(x))
         ys.append(int(y))
     symmetriy_idx = (xs, ys)
+    symmetriy_idx = torch.tensor(symmetriy_idx)
 
     patch_kwargs = {
         "vertex_idx": vertex_idxs,
@@ -67,13 +69,10 @@ def load_template(file_path):
         "curve_idx": curve_idxs,
     }
 
-    return parameters, patch_kwargs, curve_kwargs
+    return parameters, vertex_idxs, face_idxs, symmetriy_idx, curve_idxs
 
 if __name__ == '__main__':
     # ` python src/dataset/load_template.py `
     file_path = "data/templates/sphere24"
-    parameters, patch_kwargs, curve_kwargs = load_template(file_path)
-    print(len(patch_kwargs["vertex_idx"]))
-    print(len(patch_kwargs["face_idx"]))
-    print(patch_kwargs["symmetriy_idx"])
+    parameters, vertex_idx, face_idx, symmetriy_idx, curve_idx = load_template(file_path)
     print(parameters.shape)
