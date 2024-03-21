@@ -29,28 +29,34 @@ class Model(nn.Module):
 
         return vertices.repeat(self.batch_size, 1)
         
-def compute_loss(vertices, patches, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, epoch_num):
-    st = torch.empty(
-        patches.shape[0],
-        patches.shape[1],
-        sample_num**2,
-        2
-    ).uniform_().to(patches) # [b, patch_num, sample_num, 2]
+def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, epoch_num):
+    batch_size = patches.shape[0]
+    face_num = patches.shape[1]
+    st = torch.empty(batch_size, face_num, sample_num**2, 2).uniform_().to(patches) # [b, patch_num, sample_num, 2]
+
     FA_rate = 0.0
     chamfer_weight_rate = 0.5
 
     # preprocessing
-    points = coons_points(st[..., 0], st[..., 1], patches) # [b, patch, cp, 3]
+    # patches (B,face_num,cp_num,3)
+    points  = coons_points(st[..., 0], st[..., 1], patches) # [b, patch_num, sample_num, 3]
     normals = coons_normals(st[..., 0], st[..., 1], patches)
-    mtds = coons_mtds(st[..., 0], st[..., 1], patches)
-    pcd_points = pcd_points.repeat(points.shape[0],1,1)
-    pcd_normals = pcd_normals.repeat(points.shape[0],1,1)
-    pcd_area = pcd_area.repeat(points.shape[0],1,1)
+    mtds    = coons_mtds(st[..., 0], st[..., 1], patches)   # [b, patch_num, sample_num] 
+    pcd_points  = pcd_points.repeat(batch_size,1,1)
+    pcd_normals = pcd_normals.repeat(batch_size,1,1)
+    pcd_area    = pcd_area.repeat(batch_size,1,1)
 
     # area-weighted chamfer loss (position + normal)
     chamfer_loss, normal_loss = area_weighted_chamfer_loss(
         mtds, points, normals, pcd_points, pcd_normals, chamfer_weight_rate
     )
+    
+    # curve chamfer loss
+    # curves (b, curve_num, cp_num, 3)
+    curve_s_num = 16
+    curve_s = torch.linspace(0, 1, curve_s_num).to(curves).flatten()[..., None]
+    curve_points = bezier_sample(curve_s, curves)
+    curve_chamfer = curve_chamfer_loss(curve_points, pcd_points)
 
     # flatness loss
     planar_loss = planar_patch_loss(st, points, mtds)
@@ -70,9 +76,9 @@ def compute_loss(vertices, patches, pcd_points, pcd_normals, pcd_area, sample_nu
 
     # loss = chamfer_loss + 0.01*overlap_loss + 2*planar_loss + 0.1*symmetry_loss
     if epoch_num <= 200:
-        loss = chamfer_loss + 0.0*overlap_loss + 0*planar_loss + 0.1*symmetry_loss + 0.1*normal_loss * math.exp(-epoch_num/100)
+        loss = chamfer_loss + 0.0*overlap_loss + 0.1*planar_loss + 0.1*symmetry_loss + 0.1*normal_loss * math.exp(-epoch_num/100)
     else:
-        loss = chamfer_loss + 0.0*overlap_loss + 0*planar_loss + 0.1*symmetry_loss + 0.1*normal_loss * math.exp((epoch_num-400)/100)
+        loss = chamfer_loss + 0.0*overlap_loss + 0.1*planar_loss + 0.1*symmetry_loss + 0.1*math.exp((epoch_num-400)/100) * normal_loss #+ math.exp((epoch_num-450)/100) * curve_chamfer
 
     return loss.mean()
 
@@ -117,9 +123,9 @@ def main(**kwargs):
     for i in loop:
         vertices = model()
         vertices = vertices.view(batch_size,-1,3)
-        patches = vertices[:,face_idx]
-        curves = vertices[:,curve_idx]
-        loss = compute_loss(vertices, patches, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, i)
+        patches = vertices[:,face_idx] # (B, face_num, cp_num, 3)
+        curves = vertices[:,curve_idx] # (B, curve_num, cp_num, 3)
+        loss = compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, i)
         loop.set_description('Loss: %.4f' % (loss.item()))
 
         optimizer.zero_grad()
@@ -138,11 +144,11 @@ if __name__ == '__main__':
     # ` python src/train.py `
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_path', type=str, default="data/models/cat")
-    parser.add_argument('--template_path', type=str, default="data/templates/sphere24")
+    parser.add_argument('--template_path', type=str, default="data/templates/sphere96")
     # parser.add_argument('--template_path', type=str, default="data/templates/animel122")
-    parser.add_argument('--output_path', type=str, default="output_cat_24")
+    parser.add_argument('--output_path', type=str, default="output_cat_96")
 
-    parser.add_argument('--epoch', type=int, default="401")
+    parser.add_argument('--epoch', type=int, default="301")
     parser.add_argument('--batch_size', type=int, default="1")
     parser.add_argument('--learning_rate', type=float, default="0.02")
 

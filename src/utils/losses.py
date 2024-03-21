@@ -25,9 +25,8 @@ def area_weighted_chamfer_loss(
     mean_gt_dis = gt_to_center.mean(1)
     # [b, n_sample_points]
     # [b, n_mesh_points]
-    weight = (torch.max(torch.tensor(0.).to(mtds),dis_to_center-mean_dis.unsqueeze(1))*chamfer_weight_rate + torch.ones_like(dis_to_center).to(dis_to_center)).detach()
-    weight_gt = (torch.max(torch.tensor(0.).to(mtds),gt_to_center-mean_gt_dis.unsqueeze(1))*chamfer_weight_rate + torch.ones_like(gt_to_center).to(gt_to_center)).detach()
-    # print(torch.max(torch.tensor(0.).to(mtds),dis_to_center-mean_dis.unsqueeze(1)).shape)
+    distance_weight = (torch.max(torch.tensor(0.).to(mtds),dis_to_center-mean_dis.unsqueeze(1)) * 0.5 + torch.ones_like(dis_to_center).to(dis_to_center)).detach()
+    distance_weight_gt = (torch.max(torch.tensor(0.).to(mtds),gt_to_center-mean_gt_dis.unsqueeze(1)) * 0.5 + torch.ones_like(gt_to_center).to(gt_to_center)).detach()
 
     chamferloss_a, idx_a = distances.min(2)  # [b, n_sample_points]
     chamferloss_b, idx_b = distances.min(1)  # [b, n_mesh_points]
@@ -55,8 +54,8 @@ def area_weighted_chamfer_loss(
 
     mtds = mtds.view(b, -1)
     # chamferloss_a = torch.sum(mtds*chamferloss_a*weight, dim=-1) / mtds.sum(-1) # [b]
-    chamferloss_a = torch.sum(mtds*chamferloss_a*weight, dim=-1) / 2000 # [b]
-    chamferloss_b = (chamferloss_b*weight_gt).mean(1) # [b]
+    chamferloss_a = torch.sum(mtds*chamferloss_a*distance_weight, dim=-1) / 2000 # [b]
+    chamferloss_b = (chamferloss_b*distance_weight_gt).mean(1) # [b]
     chamfer_loss = ((chamferloss_a+chamferloss_b).mean() / 2).view(1)
     
     normalsloss_a = torch.sum(mtds*normalsloss_a, dim=-1) / mtds.sum(-1)
@@ -462,3 +461,27 @@ def flatness_area_loss(st, points, mtds):
     # loss = torch.tensor(1.).to(mtds)/torch.sum(weight2*area, dim = -1).mean()
     
     return loss
+
+def curve_chamfer_loss(x1, x2):
+    """Compute batched l2 cdist."""
+    # x3 is the center point of point cloud
+    b = x1.shape[0]
+    x1 = x1.view(b, -1, 3)
+    x1_norm = x1.pow(2).sum(-1, keepdim=True) # [8, 4374, 1]
+    x2_norm = x2.pow(2).sum(-1, keepdim=True) # [8, 4096, 1]
+
+    res = torch.baddbmm(
+        x2_norm.transpose(-2, -1),
+        x1,
+        x2.transpose(-2, -1),
+        alpha=-2
+    ).add_(x1_norm).clamp_min_(1e-10).sqrt_()
+    # ||(x1 - x2)|| = ((x1 ^ 2) - 2 * (x1 * x2) + (x2 ^ 2)) ^ (1/2)
+    # [b, n_sample_points, n_mesh_points]
+
+    chamferloss_a, idx_a = res.min(2)  # [b, n_sample_points]
+    chamferloss_b, idx_b = res.min(1)  # [b, n_mesh_points]
+
+    # chamferloss = (chamferloss_a.mean(1) + chamferloss_b.mean(1))/2
+    chamferloss = chamferloss_a.mean(1)
+    return chamferloss
