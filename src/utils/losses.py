@@ -7,6 +7,7 @@ def area_weighted_chamfer_loss(
     target_points, # [b, 4096, 3]
     target_normals,
     chamfer_weight_rate,
+    multi_view_weights,
     compute_normals=True
 ):
     """ Compute area-weighted Chamfer loss. """
@@ -29,7 +30,8 @@ def area_weighted_chamfer_loss(
     distance_weight_gt = (torch.max(torch.tensor(0.).to(mtds),gt_to_center-mean_gt_dis.unsqueeze(1)) * 0.5 + torch.ones_like(gt_to_center).to(gt_to_center)).detach()
 
     chamferloss_a, idx_a = distances.min(2)  # [b, n_sample_points]
-    chamferloss_b, idx_b = distances.min(1)  # [b, n_mesh_points]
+    chamferloss_b, idx_b = distances.min(1)  # [b, n_mesh_points] 4096
+    # chamferloss_b = chamferloss_b * multi_view_weights
 
     if compute_normals:
         normals = normals.view(b, -1, 3)

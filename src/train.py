@@ -29,7 +29,7 @@ class Model(nn.Module):
 
         return vertices.repeat(self.batch_size, 1)
         
-def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, epoch_num):
+def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, multi_view_weights, epoch_num):
     batch_size = patches.shape[0]
     face_num = patches.shape[1]
     st = torch.empty(batch_size, face_num, sample_num**2, 2).uniform_().to(patches) # [b, patch_num, sample_num, 2]
@@ -48,7 +48,7 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, s
 
     # area-weighted chamfer loss (position + normal)
     chamfer_loss, normal_loss = area_weighted_chamfer_loss(
-        mtds, points, normals, pcd_points, pcd_normals, chamfer_weight_rate
+        mtds, points, normals, pcd_points, pcd_normals, chamfer_weight_rate, multi_view_weights
     )
     
     # curve chamfer loss
@@ -76,9 +76,9 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, s
 
     # loss = chamfer_loss + 0.01*overlap_loss + 2*planar_loss + 0.1*symmetry_loss
     if epoch_num <= 200:
-        loss = chamfer_loss + 0.0*overlap_loss + 0.1*planar_loss + 0.1*symmetry_loss + 0.1*normal_loss * math.exp(-epoch_num/100)
+        loss = chamfer_loss + 0.0*overlap_loss + 0.0*planar_loss + 0.1*symmetry_loss + 0.1*normal_loss * math.exp(-epoch_num/100)
     else:
-        loss = chamfer_loss + 0.0*overlap_loss + 0.1*planar_loss + 0.1*symmetry_loss + 0.1*math.exp((epoch_num-400)/100) * normal_loss #+ math.exp((epoch_num-450)/100) * curve_chamfer
+        loss = chamfer_loss + 0.0*overlap_loss + 0.0*planar_loss + 0.1*symmetry_loss + 0.1*math.exp((epoch_num-400)/100) * normal_loss #+ math.exp((epoch_num-450)/100) * curve_chamfer
 
     return loss.mean()
 
@@ -103,6 +103,11 @@ def main(**kwargs):
     pcd_points, pcd_normals, pcd_area = load_npz(model_path)
     pcd_points, pcd_normals, pcd_area = pcd_points.to(device), pcd_normals.to(device), pcd_area.to(device)
 
+    # load weights .pt
+    multi_view_weights = torch.load(f'{model_path}/weights.pt')/2 + 1
+    multi_view_weights = multi_view_weights.detach()
+    multi_view_weights.requires_grad_(False)
+
     # load template
     template_path = kwargs['template_path']
     template_params, vertex_idx, face_idx, symmetriy_idx, curve_idx = load_template(template_path)
@@ -125,7 +130,7 @@ def main(**kwargs):
         vertices = vertices.view(batch_size,-1,3)
         patches = vertices[:,face_idx] # (B, face_num, cp_num, 3)
         curves = vertices[:,curve_idx] # (B, curve_num, cp_num, 3)
-        loss = compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, i)
+        loss = compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, sample_num, symmetriy_idx, multi_view_weights, i)
         loop.set_description('Loss: %.4f' % (loss.item()))
 
         optimizer.zero_grad()
