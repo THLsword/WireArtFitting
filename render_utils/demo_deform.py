@@ -125,7 +125,15 @@ class attention(nn.Module):
         out = rearrange(out,'B N C -> B C N').contiguous()
         return out
 
-def main(DATA_DIR, pcd_path, gt_path, output_path):
+def save_obj(filename, cps):
+    # cps (p_num, 3)
+    with open(filename, 'w') as file:
+        # 遍历每个点，将其写入文件
+        for point in cps:
+            # 格式化为OBJ文件中的顶点数据行
+            file.write("v {} {} {}\n".format(*point))
+
+def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
     torch.cuda.empty_cache()
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
@@ -142,7 +150,7 @@ def main(DATA_DIR, pcd_path, gt_path, output_path):
     # 缩放点云使其适应[-1, 1]范围
     max_distance = np.max(np.sqrt(np.sum(point_cloud_centered ** 2, axis=1)))
     point_cloud_normalized = point_cloud_centered / max_distance
-    pcd_tensor = torch.tensor(point_cloud_normalized).to(torch.float32)
+    pcd_tensor = torch.tensor(point_cloud_normalized).to(torch.float32).to(device)
 
     # load gt
     multi_view_paths = []
@@ -161,7 +169,7 @@ def main(DATA_DIR, pcd_path, gt_path, output_path):
     optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
     loss_fn = nn.MSELoss(reduction="mean")
 
-    loop = tqdm.tqdm(list(range(0, 201)))
+    loop = tqdm.tqdm(list(range(0, epoch)))
     for i in loop:
         images, colors = model.forward()
 
@@ -181,6 +189,12 @@ def main(DATA_DIR, pcd_path, gt_path, output_path):
             save_img(images[3].detach().cpu().numpy(),f'{output_path}/output_{i}_3.png')
             torch.save(colors, f'{DATA_DIR}/weights.pt')
             torch.save(colors, f'{output_path}/weights.pt')
+
+        if i == epoch - 1:
+            mask = (colors > 0.5)
+            masked_pcd = pcd_tensor[mask]
+            save_obj(f'{output_path}/multi_view.obj', masked_pcd)
+
     torch.cuda.empty_cache()
 
 
@@ -190,10 +204,11 @@ if __name__ == '__main__':
     parser.add_argument('--GT_DIR', type=str, default="./render_utils/expand_outputs")
     parser.add_argument('--SAVE_DIR', type=str, default="./render_utils/train_outputs")
     parser.add_argument('--filename', type=str, default="model_normalized_4096.npz")
+    parser.add_argument('--epoch', type=int, default=201)
 
     args = parser.parse_args()
 
     file_path = os.path.join(args.DATA_DIR, args.filename)
     os.makedirs(args.SAVE_DIR, exist_ok=True)
 
-    main(args.DATA_DIR, file_path, args.GT_DIR, args.SAVE_DIR)
+    main(args.DATA_DIR, file_path, args.GT_DIR, args.SAVE_DIR, args.epoch)

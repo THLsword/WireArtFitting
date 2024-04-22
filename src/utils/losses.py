@@ -31,7 +31,7 @@ def area_weighted_chamfer_loss(
 
     chamferloss_a, idx_a = distances.min(2)  # [b, n_sample_points]
     chamferloss_b, idx_b = distances.min(1)  # [b, n_mesh_points] 4096
-    # chamferloss_b = chamferloss_b * multi_view_weights
+    chamferloss_b = chamferloss_b * multi_view_weights
 
     if compute_normals:
         normals = normals.view(b, -1, 3)
@@ -464,9 +464,9 @@ def flatness_area_loss(st, points, mtds):
     
     return loss
 
-def curve_chamfer_loss(x1, x2):
-    """Compute batched l2 cdist."""
-    # x3 is the center point of point cloud
+def multiview_curve_chamfer_loss(x1, x2):
+    # x1 is curve sample points
+    # x2 is mesh sample points
     b = x1.shape[0]
     x1 = x1.view(b, -1, 3)
     x1_norm = x1.pow(2).sum(-1, keepdim=True) # [8, 4374, 1]
@@ -485,5 +485,43 @@ def curve_chamfer_loss(x1, x2):
     chamferloss_b, idx_b = res.min(1)  # [b, n_mesh_points]
 
     # chamferloss = (chamferloss_a.mean(1) + chamferloss_b.mean(1))/2
-    chamferloss = chamferloss_a.mean(1)
+    chamferloss = chamferloss_b.mean(1)
     return chamferloss
+
+def curve_chamfer(x1, x2):
+    # x1 is curve sample points
+    # x2 is mesh sample points
+    b = x1.shape[0]
+    x1 = x1.view(b, -1, 3)
+    x1_norm = x1.pow(2).sum(-1, keepdim=True) # [8, 4374, 1]
+    x2_norm = x2.pow(2).sum(-1, keepdim=True) # [8, 4096, 1]
+
+    res = torch.baddbmm(
+        x2_norm.transpose(-2, -1),
+        x1,
+        x2.transpose(-2, -1),
+        alpha=-2
+    ).add_(x1_norm).clamp_min_(1e-10).sqrt_()
+    # ||(x1 - x2)|| = ((x1 ^ 2) - 2 * (x1 * x2) + (x2 ^ 2)) ^ (1/2)
+    # [b, n_sample_points, n_mesh_points]
+
+    chamferloss_a, idx_a = res.min(2)  # [b, x1]
+    chamferloss_b, idx_b = res.min(1)  # [b, x2]
+
+    return chamferloss_a, idx_a, chamferloss_b, idx_b
+
+def curve_2_pcd(x1, x2, k):
+    b = x1.shape[0]
+    x1 = x1.view(b, -1, 3)
+    x1_norm = x1.pow(2).sum(-1, keepdim=True) # [8, 4374, 1]
+    x2_norm = x2.pow(2).sum(-1, keepdim=True) # [8, 4096, 1]
+
+    res = torch.baddbmm(
+        x2_norm.transpose(-2, -1),
+        x1,
+        x2.transpose(-2, -1),
+        alpha=-2
+    ).add_(x1_norm).clamp_min_(1e-10).sqrt_()
+
+    x, x_idx = torch.topk(res, k, dim=2, largest=False)
+    return x, x_idx
