@@ -32,6 +32,25 @@ def save_obj(filename, points):
             # 格式化为OBJ文件中的顶点数据行
             file.write("v {} {} {}\n".format(*point))
 
+def curve_topology(vertex_idx, curve_idx, curves, curves_mask):
+    # curve [n, n]: idx of connected curves
+    # (96, 4) -> (96, 2) head and tail
+    curve_ht_idx = curve_idx[:,[0,-1]] # (96,2)
+    topology_mask = []
+    for i in curve_ht_idx:
+        mask1 = (curve_ht_idx == i[0]).sum(1) & curves_mask
+        mask2 = (curve_ht_idx == i[1]).sum(1) & curves_mask
+        different_value_mask = ~(mask1 == mask2)
+        match1 = (mask1 & different_value_mask).sum() / 2
+        match2 = (mask2 & different_value_mask).sum() / 2
+        if match1 == 0 or match2 == 0:
+            topology_mask.append(False)
+        else:
+            topology_mask.append(True)
+    topology_mask = torch.tensor(topology_mask)
+
+    return topology_mask
+
 def post_processing(**kwargs):
     torch.cuda.empty_cache()
     if torch.cuda.is_available():
@@ -75,9 +94,9 @@ def post_processing(**kwargs):
     sampled_pcd = pcd_points[0][pcd_idx]
 
     # each curves' points idx and cood
-    review_idx = pdc_k_idx.view(curve_num, -1, kwargs['k']) # (1, 13440, 3) -> (96, 140, 3)
-    curve_idx_list = []
-    curve_cood_list = []
+    review_idx = pdc_k_idx.view(curve_num, -1, kwargs['k']) # (1, 13440, k) -> (96, 140, k)
+    curve_idx_list = []  # (96, n)
+    curve_cood_list = [] # (96, n, 3)
     for i in review_idx:
         curve_idx_list.append(torch.unique(i))
         cood = pcd_points[0][torch.unique(i)]
@@ -87,7 +106,7 @@ def post_processing(**kwargs):
     mv_path = kwargs['mv_path']
     mv_points = load_obj(f"{mv_path}/multi_view.obj").to(device)
     
-    # match each curve's cood <-> mv points
+    # match each curve's cood <-> all mv points
     matched_points_list = []
     matched_points = torch.tensor([]).to(device)
     for i in curve_cood_list:
@@ -106,7 +125,30 @@ def post_processing(**kwargs):
     curve_cood_list_thresh = [cood for i, cood in enumerate(curve_cood_list) if curve_match_rate[i] > kwargs['match_rate']]
     matched_points_list_thresh = [cood for i, cood in enumerate(matched_points_list) if curve_match_rate[i] > kwargs['match_rate']]
     curve_thresh_mask = curve_match_rate > kwargs['match_rate']
-    
+
+    # new match method. 
+    # [96, 140, k] <-match-> all mv points. 
+    # [96, 140, k] -> [96, 140T/F]
+    curves_points_idx = review_idx # (96, 140, k)
+    new_rate = []
+    for c_idx in curves_points_idx: # (140, k)
+        review_c_idx = c_idx.view(-1) # (140*k)
+        coods = pcd_points[0][review_c_idx] # (140*k, 3)
+        # match 
+        matches = coods.unsqueeze(1) == mv_points.unsqueeze(0)
+        matches = matches.all(dim=2)
+        matched_indices_tensor1 = matches.any(dim=1) # [curve_on_pcd num]
+        matched_indices_tensor2 = matches.any(dim=0) # [mv num]
+        matched_indices_tensor1 = matched_indices_tensor1.view(-1, kwargs['k']).sum(1)
+        mask = matched_indices_tensor1 > 0
+        rate = mask.sum() / c_idx.shape[0]
+        new_rate.append(rate)
+    new_rate = torch.tensor(new_rate)
+    curve_thresh_mask = new_rate > kwargs['match_rate']
+
+    topology_mask = curve_topology(vertex_idx, curve_idx, curves, curve_thresh_mask.to(device))
+    curve_thresh_mask = curve_thresh_mask & topology_mask
+
     # chamfer distance of curves' matched points <-> curves' sample points, calculate offset vecotr of each curve
     curve_matched_sample_points = curve_points[0][curve_thresh_mask] # (matched curve num, sample num, 3)
     mean_offsets = []
@@ -122,7 +164,7 @@ def post_processing(**kwargs):
     counter = 0
     for i, points in enumerate(curve_cood_list):
         if curve_thresh_mask[i]:
-            points = points + mean_offsets[counter]
+            points = points# + mean_offsets[counter]
             matched_points = torch.cat([matched_points, points], dim=0)
             counter = counter + 1
 
@@ -146,7 +188,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
     parser.add_argument('--k', type=int, default=3) # 裡curve採樣點最近的k個點
-    parser.add_argument('--match_rate', type=float, default=0.2) 
+    parser.add_argument('--match_rate', type=float, default=0.4) 
 
     args = parser.parse_args()
     post_processing(**vars(args)) # find curves in pcd

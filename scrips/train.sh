@@ -1,13 +1,13 @@
 #!/bin/bash
 
-(
-trap 'kill 0' SIGINT;
+animel='cat'
 
-tensorboard --logdir apes_log --port 1122 --bind_all & \
+python src/train.py       \
+--model_path=./data/models/${animel} \
+--output_path=./output_${animel} \
+--mv_path=./output_${animel}/render_utils/train_outputs
 
-python src/train.py \
---filename cube_data_batch8_02
-# --filename modelnet_local_02
-
-# python src/train.py --conf-path configs/animal.conf
-)
+# python src/postprocess.py \
+# --model_path=./data/models/${animel} \
+# --output_path=./output_${animel} \
+# --mv_path=./output_${animel}/render_utils/train_outputs

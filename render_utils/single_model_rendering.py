@@ -57,14 +57,14 @@ def render_pcd(DATA_DIR,SAVE_DIR,file_path,filename):
     # Initialize a camera.
     list_R=[]
     list_T=[]
-    for x in [55,145,235,325]:
+    for x in [45,135,225,315]:
         temp_R, temp_T = look_at_view_transform(1.5, 15, x)
         list_R.append(temp_R)
         list_T.append(temp_T)
 
     raster_settings = PointsRasterizationSettings(
         image_size=256, 
-        radius = 0.01,
+        radius = 0.015,
         points_per_pixel = 5
     )
 
@@ -96,8 +96,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Set paths
-    os.makedirs(args.SAVE_DIR, exist_ok=True)
-
+    if not os.path.exists(args.SAVE_DIR):
+        os.makedirs(args.SAVE_DIR, exist_ok=True)
 
     file_path = os.path.join(args.DATA_DIR, args.filename)
     render_pcd(args.DATA_DIR,args.SAVE_DIR,file_path,args.filename)

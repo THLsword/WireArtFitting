@@ -86,18 +86,17 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, m
 
     
     # loss = chamfer_loss + 0.01*overlap_loss + 2*planar_loss + 0.1*symmetry_loss
-    stable_loss = chamfer_loss + 0.01*overlap_loss + 2.0*planar_loss + 0.1*symmetry_loss + 0.011 * curvature_loss
-    if epoch_num <= 200:
-        loss = stable_loss
+    stable_loss = chamfer_loss + 0.01*overlap_loss + 2.5*planar_loss + 0.1*symmetry_loss# + 0.012 * curvature_loss
+    if epoch_num <= 50:
+        loss = stable_loss + 0.012 * curvature_loss
                 # + 0.1 * math.exp(-epoch_num/100) * normal_loss
                 #+ 0.05 * mv_curve_loss 
-    else:
-        loss = stable_loss +  0.1*math.exp((epoch_num-400)/100) * normal_loss 
+    elif epoch_num > 50 and epoch_num <= 100:
+        loss = stable_loss + 0.012 * curvature_loss + 0.1*normal_loss * math.exp((epoch_num-150)/100)
+    else :
+        loss = stable_loss* math.exp((100-epoch_num)/100) +  0.1*normal_loss * math.exp((epoch_num-150)/100) + 0.01*curvature_loss * math.exp((100-epoch_num)/100)
                 #+ math.exp((epoch_num-450)/100) * curve_chamfer_loss
                 #+ 0.05 * mv_curve_loss \
-
-    if epoch_num > 400:
-        loss =  0.1*symmetry_loss + 0.012 * curvature_loss
 
     return loss.mean()
 
@@ -183,19 +182,20 @@ def training(**kwargs):
         loss.backward()
         optimizer.step()
 
-        if i % 100 == 0 or i == kwargs['epoch'] - 1:
+        if i % 50 == 0 or i == kwargs['epoch'] - 1:
             with torch.no_grad():
                 output_path = kwargs['output_path']
                 os.makedirs(output_path, exist_ok=True)
-                write_curve_points(f"{output_path}/{i}_curve.obj", curves[0], control_point_num)
-                write_obj(f"{output_path}/{i}_mesh.obj", patches[0], control_point_num)
+                os.makedirs(f"{output_path}/training_save", exist_ok=True)
+                write_curve_points(f"{output_path}/training_save/{i}_curve.obj", curves[0], control_point_num)
+                write_obj(f"{output_path}/training_save/{i}_mesh.obj", patches[0], control_point_num)
 
                 # curve probability
                 # curves (b, curve_num, cp_num, 3)
                 curve_sample_num = 16
                 curves, curves_mask = curve_probability(mv_points, curves[0], curve_sample_num)
                 torch.save(curves_mask, f'{output_path}/curves_mask.pt')
-                write_curve_points(f"{output_path}/{i}_curve_d.obj", curves, control_point_num)
+                # write_curve_points(f"{output_path}/training_save/{i}_curve_d.obj", curves, control_point_num)
 
                 # save control points
                 save_obj(f"{output_path}/control_points.obj", vertices[0])
@@ -208,9 +208,9 @@ if __name__ == '__main__':
     parser.add_argument('--output_path', type=str, default="output_cat_test")
     parser.add_argument('--mv_path', type=str, default="render_utils/train_outputs")
 
-    parser.add_argument('--epoch', type=int, default="401")
+    parser.add_argument('--epoch', type=int, default="151")
     parser.add_argument('--batch_size', type=int, default="1") # 不要改，就是1
-    parser.add_argument('--learning_rate', type=float, default="0.01")
+    parser.add_argument('--learning_rate', type=float, default="0.02")
 
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
     parser.add_argument('--k', type=int, default=3) # 裡curve採樣點最近的k個點

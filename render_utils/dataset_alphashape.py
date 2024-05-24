@@ -62,7 +62,7 @@ def alpha(DATA_DIR,SAVE_DIR,filename):
 
     shaper = Alpha_Shaper(points_2d)
     try:
-        alpha = 30.0
+        alpha = 75.0
         alpha_shape = shaper.get_shape(alpha=alpha)
         
         vertices = []

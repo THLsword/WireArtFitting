@@ -41,13 +41,13 @@ class Model(nn.Module):
         self.register_parameter('displace', nn.Parameter(torch.zeros_like(self.init_colors)))
 
         # render
-        self.views = [55,145,235,325] # degree of 360
+        self.views = [45,135,225,315] # degree of 360
         self.view_num = len(self.views)
         # self.R, self.T = look_at_view_transform(2.0, 10, 55) 
         self.R, self.T = look_at_view_transform(1.5, 15, self.views) 
         self.raster_settings = PointsRasterizationSettings(
             image_size=256, 
-            radius = 0.01,
+            radius = 0.015,
             points_per_pixel = 5
         )
         # self.cameras = PerspectiveCameras(R=self.R, T=self.T, device='cpu')
@@ -98,7 +98,7 @@ def WeightL1(pred, target):
 
     # count_all = torch.sum((pred <= target) & (target > 0))
     count_all = torch.sum(target > 0)
-    L1_loss = torch.where(pred <= target, (pred - target)*4, pred - target)
+    L1_loss = torch.where(pred <= target, (pred - target)*4, (pred - target)*0.5)
     # L1_loss = pred - target
     L1_loss = L1_loss.abs()
     L1_loss = L1_loss.sum()/count_all
@@ -158,11 +158,15 @@ def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
         if filename.endswith('.png'):
             file_path = os.path.join(gt_path, filename)
             multi_view_paths.append(file_path)
+    multi_view_paths.sort()
+    print(multi_view_paths)
+
 
     multi_view_imgs = [Image.open(path) for path in multi_view_paths]
     np_imgs = [np.array(img) for img in multi_view_imgs]
     gt_np = [img.astype(np.float32) / 255. for img in np_imgs]
     images_gt = torch.tensor(gt_np).to(device)
+    print(images_gt.shape)
     # print("images_gt: ", images_gt.shape)
 
     model = Model(pcd_tensor, device).to(device)
@@ -209,6 +213,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     file_path = os.path.join(args.DATA_DIR, args.filename)
-    os.makedirs(args.SAVE_DIR, exist_ok=True)
+    # Set paths
+    if not os.path.exists(args.SAVE_DIR):
+        os.makedirs(args.SAVE_DIR, exist_ok=True)
 
     main(args.DATA_DIR, file_path, args.GT_DIR, args.SAVE_DIR, args.epoch)

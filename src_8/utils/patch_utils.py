@@ -111,7 +111,6 @@ def coons_partial_derivative_8(s, t, patches):
             corners[2] * (1-s) + corners[3] * s   # [..., n_samples, 3]
     coons_point_dt = Lc_dt + Ld_dt - B_dt
 
-
     return coons_point_ds, coons_point_dt
 
 def coons_normals_(s, t, patches, control_point_num = 4):
@@ -255,14 +254,14 @@ def bezier_sample(t, params):
 
 def bezier_sample_8(t, params):
     """Sample points from cubic Bezier curves defined by params at t values."""
-    A = params.new_tensor([[1, 0, 0, 0, 0, 0, 0, 0],
-                            [-7, 7, 0, 0, 0, 0, 0, 0],
-                            [21, -42, 21, 0, 0, 0, 0, 0],
-                            [-35, 105, -105, 35, 0, 0, 0, 0],
-                            [35, -140, 210, -140, 35, 0, 0, 0],
-                            [-21, 105, -210, 210, -105, 21, 0, 0],
-                            [7, -42, 105, -140, 105, -42, 7, 0],
-                            [-1, 7, -21, 35, -35, 21, -7, 1]
+    A = params.new_tensor([[1,     0,     0,    0,    0,   0,  0, 0],
+                            [-7,   7,     0,    0,    0,   0,  0, 0],
+                            [21,  -42,   21,    0,    0,   0,  0, 0],
+                            [-35, 105, -105,   35,    0,   0,  0, 0],
+                            [35, -140,  210, -140,   35,   0,  0, 0],
+                            [-21, 105, -210,  210, -105,  21,  0, 0],
+                            [7,   -42,  105, -140,  105, -42,  7, 0],
+                            [-1,    7,  -21,   35,  -35,  21, -7, 1]
                             ])
 
     t = t.pow(t.new_tensor([0, 1, 2, 3, 4, 5, 6, 7]))  # [n_samples, 4]
