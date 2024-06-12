@@ -1,6 +1,6 @@
 #!/bin/bash
 
-animel='cat'
+animel='rabbit'
 
 python render_utils/single_model_rendering.py \
 --DATA_DIR=./data/models/${animel} \
@@ -24,9 +24,10 @@ python render_utils/demo_deform.py \
 python src/train.py       \
 --model_path=./data/models/${animel} \
 --output_path=./output_${animel} \
---mv_path=./output_${animel}/render_utils/train_outputs
+--mv_path=./output_${animel}/render_utils/train_outputs \
+--epoch=201
 
-# python src/postprocess.py \
-# --model_path=./data/models/${animel} \
-# --output_path=./output_${animel} \
-# --mv_path=./output_${animel}/render_utils/train_outputs
+python src/postprocess.py \
+--model_path=./data/models/${animel} \
+--output_path=./output_${animel} \
+--mv_path=./output_${animel}/render_utils/train_outputs
