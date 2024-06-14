@@ -16,7 +16,7 @@ from utils.patch_utils import *
 from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
-from scipy.interpolate import interp1d
+from scipy.interpolate import BSpline
 
 def save_img(img,file_name):
     # img (256,256,3) np array
@@ -77,6 +77,26 @@ def curve_topology(vertex_idx, curve_idx, curves, curves_mask):
 
     return topology_mask
 
+def create_bspline(mean_curve_points):
+    k = 3
+    sample_num = 400
+    curves = np.zeros([mean_curve_points.shape[0], sample_num, 3])
+    for i, curve in enumerate(mean_curve_points):
+        # curve (140,3) 
+        curve = curve.numpy()
+        _, idxs = np.unique(curve, axis=0, return_index=True)
+        unique_curve = curve[np.sort(idxs)]
+        cp_num = unique_curve.shape[0]
+        k = int(cp_num/3)
+        m = k + cp_num + 1
+        t = np.linspace(0, 1, m-2*k)
+        t = np.concatenate(([t[0]]*k, t, [t[-1]]*k))
+        spl = BSpline(t, unique_curve, k)
+        tnew = np.linspace(t[0], t[-1], sample_num)
+        new_curve = spl(tnew) # (sample_num, 3)
+        curves[i] = new_curve
+    return curves
+
 def post_processing(**kwargs):
     torch.cuda.empty_cache()
     if torch.cuda.is_available():
@@ -84,6 +104,7 @@ def post_processing(**kwargs):
         torch.cuda.set_device(device)
     else:
         device = torch.device("cpu")
+    device = torch.device("cpu")
 
     # init param
     batch_size = kwargs["batch_size"]
@@ -98,7 +119,7 @@ def post_processing(**kwargs):
     template_path = kwargs['template_path']
     _, vertex_idx, face_idx, symmetriy_idx, curve_idx = load_template(template_path)
     vertex_idx, face_idx, curve_idx = vertex_idx.to(device), face_idx.to(device), curve_idx.to(device)
-    sample_num = int(np.ceil(np.sqrt(4096/face_idx.shape[0])))*10
+    sample_num = int(np.ceil(np.sqrt(4096/face_idx.shape[0])))*2
 
     # load control points -> curves 
     output_path = kwargs['output_path']
@@ -198,10 +219,12 @@ def post_processing(**kwargs):
     # curves_points_idx = (96, 140, k), pcd_points = (n, 3)
     output_curves = pcd_points[0][curves_points_idx][curve_thresh_mask] # (96, 140, k, 3)
     mean_curve_points = output_curves.mean(dim=2) # (n_matched, 140, 3)
+    bspline = create_bspline(mean_curve_points)
     save_curves(f"{output_path}/output_curves.obj", mean_curve_points)
     print(mean_curve_points.shape)
 
     # save sampled_pcd
+    save_obj(f"{output_path}/output_bspline.obj", bspline.reshape(-1,3))
     save_obj(f"{output_path}/sampled_pcd.obj", sampled_pcd)
     save_obj(f"{output_path}/matched_points.obj", matched_points)
 

@@ -41,7 +41,7 @@ class Model(nn.Module):
         self.register_parameter('displace', nn.Parameter(torch.zeros_like(self.init_colors)))
 
         # render
-        self.views = [45,135,225,315] # degree of 360
+        self.views = [45,90,135,225,270,315] # degree of 360
         self.view_num = len(self.views)
         # self.R, self.T = look_at_view_transform(2.0, 10, 55) 
         self.R, self.T = look_at_view_transform(1.5, 15, self.views) 
@@ -63,16 +63,15 @@ class Model(nn.Module):
     def forward(self):
         base = self.init_colors.to(self.device)
         colors_ = torch.sigmoid(base+self.displace) # [2048]
-        # colors = x
 
-        points = self.pcd.unsqueeze(0).repeat_interleave(4, dim=0)
+        points = self.pcd.unsqueeze(0).repeat(self.view_num,1,1)
         colors = colors_.unsqueeze(1).repeat(1,3) # (2048) -> (2048,3)
-        colors = colors.unsqueeze(0).repeat_interleave(4, dim=0)
+        colors = colors.unsqueeze(0).repeat(self.view_num,1,1)
 
         # point_cloud = Pointclouds(points=[self.pcd], features=[colors])
         point_cloud = Pointclouds(points=[points[i] for i in range(points.shape[0])], 
                                 features=[colors[i] for i in range(colors.shape[0])])
-        images = self.renderer(point_cloud) # (4,256,256,3)
+        images = self.renderer(point_cloud) # (self.view_num,256,256,3)
         return images, colors_
 
 def neg_iou_loss(predict, target):
@@ -159,15 +158,12 @@ def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
             file_path = os.path.join(gt_path, filename)
             multi_view_paths.append(file_path)
     multi_view_paths.sort()
-    print(multi_view_paths)
-
+    # print(multi_view_paths)
 
     multi_view_imgs = [Image.open(path) for path in multi_view_paths]
     np_imgs = [np.array(img) for img in multi_view_imgs]
     gt_np = [img.astype(np.float32) / 255. for img in np_imgs]
     images_gt = torch.tensor(gt_np).to(device)
-    print(images_gt.shape)
-    # print("images_gt: ", images_gt.shape)
 
     model = Model(pcd_tensor, device).to(device)
     optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
@@ -187,10 +183,12 @@ def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
         optimizer.step()
 
         if i % 50 == 0:
-            save_img(images[0].detach().cpu().numpy(),f'{output_path}/output_{i}_0.png')
-            save_img(images[1].detach().cpu().numpy(),f'{output_path}/output_{i}_1.png')
-            save_img(images[2].detach().cpu().numpy(),f'{output_path}/output_{i}_2.png')
-            save_img(images[3].detach().cpu().numpy(),f'{output_path}/output_{i}_3.png')
+            for j, image in enumerate(images):
+                save_img(image.detach().cpu().numpy(), f'{output_path}/output_{i}_{j}.png')
+            # save_img(images[0].detach().cpu().numpy(),f'{output_path}/output_{i}_0.png')
+            # save_img(images[1].detach().cpu().numpy(),f'{output_path}/output_{i}_1.png')
+            # save_img(images[2].detach().cpu().numpy(),f'{output_path}/output_{i}_2.png')
+            # save_img(images[3].detach().cpu().numpy(),f'{output_path}/output_{i}_3.png')
             torch.save(colors, f'{DATA_DIR}/weights.pt')
             torch.save(colors, f'{output_path}/weights.pt')
 

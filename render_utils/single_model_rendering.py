@@ -57,7 +57,7 @@ def render_pcd(DATA_DIR,SAVE_DIR,file_path,filename):
     # Initialize a camera.
     list_R=[]
     list_T=[]
-    for x in [45,135,225,315]:
+    for x in [45,90,135,225,270,315]:
         temp_R, temp_T = look_at_view_transform(1.5, 15, x)
         list_R.append(temp_R)
         list_T.append(temp_T)

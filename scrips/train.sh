@@ -1,6 +1,6 @@
 #!/bin/bash
 
-animel='rabbit'
+animel='cat'
 
 # python src/train.py       \
 # --model_path=./data/models/${animel} \
