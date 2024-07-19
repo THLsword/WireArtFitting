@@ -9,6 +9,10 @@ import numpy as np
 import argparse
 from einops import rearrange, repeat
 from PIL import Image
+from scipy.interpolate import BSpline
+import networkx as nx
+import tqdm
+from sklearn.decomposition import PCA
 
 from dataset.load_pcd import load_npz, load_obj
 from dataset.load_template import load_template
@@ -16,7 +20,8 @@ from utils.patch_utils import *
 from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
-from scipy.interpolate import BSpline
+from utils.postprocess_utils import get_unique_curve, project_curve_to_pcd, delete_single_curve, create_curve_graph, find_deletable_edges, compute_IOU
+
 
 def save_img(img,file_name):
     # img (256,256,3) np array
@@ -58,25 +63,6 @@ def save_curves(file_name, data):
 
     save_obj(file_name, obj_points)
 
-def curve_topology(vertex_idx, curve_idx, curves, curves_mask):
-    # curve [n, n]: idx of connected curves
-    # (96, 4) -> (96, 2) head and tail
-    curve_ht_idx = curve_idx[:,[0,-1]] # (96,2)
-    topology_mask = []
-    for i in curve_ht_idx:
-        mask1 = (curve_ht_idx == i[0]).sum(1) & curves_mask
-        mask2 = (curve_ht_idx == i[1]).sum(1) & curves_mask
-        different_value_mask = ~(mask1 == mask2)
-        match1 = (mask1 & different_value_mask).sum() / 2
-        match2 = (mask2 & different_value_mask).sum() / 2
-        if match1 == 0 or match2 == 0:
-            topology_mask.append(False)
-        else:
-            topology_mask.append(True)
-    topology_mask = torch.tensor(topology_mask)
-
-    return topology_mask
-
 def create_bspline(mean_curve_points):
     k = 3
     sample_num = 400
@@ -112,7 +98,7 @@ def post_processing(**kwargs):
     # load .npz point cloud
     model_path = kwargs['model_path']
     pcd_points, pcd_normals, pcd_area = load_npz(model_path)
-    pcd_points, pcd_normals, pcd_area = pcd_points.to(device), pcd_normals.to(device), pcd_area.to(device)
+    # pcd_points, pcd_normals, pcd_area = pcd_points.to(device), pcd_normals.to(device), pcd_area.to(device)
     pcd_points = pcd_points.repeat(batch_size,1,1)
 
     # load template
@@ -120,6 +106,13 @@ def post_processing(**kwargs):
     _, vertex_idx, face_idx, symmetriy_idx, curve_idx = load_template(template_path)
     vertex_idx, face_idx, curve_idx = vertex_idx.to(device), face_idx.to(device), curve_idx.to(device)
     sample_num = int(np.ceil(np.sqrt(4096/face_idx.shape[0])))*2
+
+    # load multi view points
+    mv_path = kwargs['mv_path']
+    mv_points = load_obj(f"{mv_path}/multi_view.obj").to(device)
+
+    # unique curves: curves were calculated twice
+    curve_idx = get_unique_curve(curve_idx)
 
     # load control points -> curves 
     output_path = kwargs['output_path']
@@ -130,48 +123,14 @@ def post_processing(**kwargs):
         curves_mask = torch.load(f'{output_path}/curves_mask.pt')
         curves = curves[curves_mask]
 
-    # find k points close to curves' sample points
-    curve_num = curves.shape[0]
-    curves = curves.repeat(batch_size, 1, 1, 1) # (b, curve_num, cp_num, 3)
-    linspace = torch.linspace(0, 1, sample_num).to(curves).flatten()[..., None]
-    curve_points = bezier_sample(linspace, curves)
-    # _, pcd_idx, _, _ = curve_chamfer(curve_points, pcd_points)
-    _, pdc_k_idx = curve_2_pcd_kchamfer(curve_points, pcd_points, kwargs['k']) # in losses.py
-    pcd_idx = torch.unique(pdc_k_idx)
-    sampled_pcd = pcd_points[0][pcd_idx] # (n, 3) only used to save as obj
-
-    # each curves' points idx and cood
-    review_idx = pdc_k_idx.view(curve_num, -1, kwargs['k']) # (1, 13440, k) -> (96, 140, k)
-    curve_idx_list = []  # (96, n)
-    curve_cood_list = [] # (96, n, 3)
-    for i in review_idx:
-        curve_idx_list.append(torch.unique(i))
-        cood = pcd_points[0][torch.unique(i)]
-        curve_cood_list.append(cood)
-
-    # load multi view points
-    mv_path = kwargs['mv_path']
-    mv_points = load_obj(f"{mv_path}/multi_view.obj").to(device)
-    
-    # match each curve's cood <-> all mv points
-    matched_points_list = []
-    matched_points = torch.tensor([]).to(device)
-    for i in curve_cood_list:
-        matches = i.unsqueeze(1) == mv_points.unsqueeze(0)
-        matches = matches.all(dim=2)
-        matched_indices_tensor1 = matches.any(dim=1) # [curve_on_pcd num]
-        matched_indices_tensor2 = matches.any(dim=0) # [mv num]
-        matched_points_list.append(i[matched_indices_tensor1])
-
-    # each curve points num after matching, then calculate rates
-    curve_match_rate = []
-    for i, points in enumerate(matched_points_list):
-        rate = len(points) / len(curve_idx_list[i])
-        curve_match_rate.append(rate)
-    curve_match_rate = torch.tensor(curve_match_rate)
-    curve_cood_list_thresh = [cood for i, cood in enumerate(curve_cood_list) if curve_match_rate[i] > kwargs['match_rate']]
-    matched_points_list_thresh = [cood for i, cood in enumerate(matched_points_list) if curve_match_rate[i] > kwargs['match_rate']]
-    curve_thresh_mask = curve_match_rate > kwargs['match_rate']
+    # project_curve_to_pcd
+    ####
+    # sampled_pcd:     (n, 3) only used to save as obj
+    # review_idx :     (96, 140, k) index of pcd 
+    # curve_idx_list : (96, n) each curve's unique idx of pcd
+    # curve_cood_list: (96, n, 3)
+    #### 
+    sampled_pcd, review_idx, curve_idx_list, curve_cood_list = project_curve_to_pcd(curves, pcd_points, batch_size, sample_num, kwargs['k'])
 
     # new match method. 
     # [96, 140, k] <-match-> all mv points. 
@@ -193,40 +152,66 @@ def post_processing(**kwargs):
     new_rate = torch.tensor(new_rate)
     curve_thresh_mask = new_rate > kwargs['match_rate']
 
-    topology_mask = curve_topology(vertex_idx, curve_idx, curves, curve_thresh_mask.to(device))
-    curve_thresh_mask = curve_thresh_mask & topology_mask # [96]
+    # curve topology
+    G, graph_list = create_curve_graph(curve_idx, curve_thresh_mask)
+    topology_mask = torch.zeros(curve_idx.shape[0])
+    for i in list(G.edges):
+        topology_mask[G.edges[i[0],i[1]]['idx']]=1
+    curve_thresh_mask = topology_mask.bool() # [96] or [48]
 
-    # # chamfer distance of curves' matched points <-> curves' sample points, calculate offset vecotr of each curve
-    # curve_matched_sample_points = curve_points[0][curve_thresh_mask] # (matched curve num, sample num, 3)
-    # mean_offsets = []
-    # for i, points in enumerate(matched_points_list_thresh):
-    #     # i [n, 3], i <-> this curve sample points chamfer distance
-    #     chamferloss_a, idx_a, _, _ = curve_chamfer(points.unsqueeze(0), curve_matched_sample_points[i].unsqueeze(0))
-    #     idx_a = idx_a.squeeze()
-    #     temp = points - curve_matched_sample_points[i][idx_a]
-    #     mean_offsets.append(temp.mean(0))
-    # mean_offsets = torch.stack(mean_offsets)
-    
-    # pcd + offset vectors
-    counter = 0
-    for i, points in enumerate(curve_cood_list):
-        if curve_thresh_mask[i]:
-            points = points# + mean_offsets[counter]
-            matched_points = torch.cat([matched_points, points], dim=0)
-            counter = counter + 1
+    # get pcd's PCA
+    pcd_np = np.array(pcd_points[0])
+    pca = PCA(n_components=3)
+    pca.fit(pcd_np)
+    all_bspline = create_bspline(pcd_points[0][review_idx].mean(dim=2)) # (48, 400, 3)
+    transformed_data = pca.transform(pcd_np)
+    transformed_bspline = pca.transform(np.array(all_bspline).reshape((-1,3)))
+    transformed_bspline = transformed_bspline.reshape((all_bspline.shape))
+    pca_x, pca_y, pca_z = np.max(transformed_data, axis=0) + np.abs(np.min(transformed_data, axis=0))
+    # rotate matrix (will project to yz plane)
+    rotate_y_angels = [0, np.arctan2(pca_z*1.5, pca_x), np.pi/2, np.pi-np.arctan2(pca_z*1.5, pca_x)]
+    rotate_matrix = []
+    for i in rotate_y_angels:
+        matrix = np.array([
+            [np.cos(i), 0, np.sin(i)],
+            [0, 1, 0],
+            [-np.sin(i), 0, np.cos(i)]
+        ])
+        rotate_matrix.append(matrix)
+    rotate_matrix.append([
+            [0, -1, 0],
+            [1, 0, 0],
+            [0, 0, 1]
+        ])
+    rotate_matrix = np.stack(rotate_matrix)
+    # compute IOU
+    bool_delete = True
+    while bool_delete:
+        G , graph_list, min_IOU = compute_IOU(rotate_matrix, G, graph_list, transformed_bspline)
+        if min_IOU > 1 - kwargs['IOU_thres']:
+            bool_delete = False
+        if len(graph_list) == 0:
+            bool_delete = False
+        # bool_delete = False
+
+    curve_thresh_mask2 = torch.zeros_like(curve_thresh_mask)
+    for i in list(G.edges):
+        curve_thresh_mask2[G.edges[i[0], i[1]]['idx']] = True
 
     # create/output new curves
     # curves_points_idx = (96, 140, k), pcd_points = (n, 3)
     output_curves = pcd_points[0][curves_points_idx][curve_thresh_mask] # (96, 140, k, 3)
     mean_curve_points = output_curves.mean(dim=2) # (n_matched, 140, 3)
     bspline = create_bspline(mean_curve_points)
-    save_curves(f"{output_path}/output_curves.obj", mean_curve_points)
-    print(mean_curve_points.shape)
+    save_obj(f"{output_path}/output_bspline1.obj", bspline.reshape(-1,3))
 
-    # save sampled_pcd
-    save_obj(f"{output_path}/output_bspline.obj", bspline.reshape(-1,3))
+    output_curves = pcd_points[0][curves_points_idx][curve_thresh_mask2] # (96, 140, k, 3)
+    mean_curve_points = output_curves.mean(dim=2) # (n_matched, 140, 3)
+    bspline = create_bspline(mean_curve_points)
+    save_obj(f"{output_path}/output_bspline2.obj", bspline.reshape(-1,3))
+
+    save_curves(f"{output_path}/output_curves.obj", mean_curve_points)
     save_obj(f"{output_path}/sampled_pcd.obj", sampled_pcd)
-    save_obj(f"{output_path}/matched_points.obj", matched_points)
 
 if __name__ == '__main__':
     # ` python src/train.py `
@@ -243,6 +228,9 @@ if __name__ == '__main__':
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
     parser.add_argument('--k', type=int, default=3) # 裡curve採樣點最近的k個點
     parser.add_argument('--match_rate', type=float, default=0.4) 
+
+    parser.add_argument('--IOU_thres', type=float, default=0.8) 
+
 
     args = parser.parse_args()
     post_processing(**vars(args)) # find curves in pcd

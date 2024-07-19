@@ -11,18 +11,21 @@ from einops import rearrange, repeat
 from PIL import Image
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.interpolate import BSpline
+import networkx as nx
 
-# a = torch.randint(1,5,[1,4,3])
-# print(a)
+G = nx.Graph()
+G.add_node(1)
+G.add_node(2)
+G.add_node(3)
+G.add_node(4)
+G.graph['1']='1'
+G.add_edge(1, 2)
+G.add_edge(1, 3)
+G.add_edge(1, 4)
+G.add_edge(2, 3)
 
-# b = a.repeat_interleave(2, dim=0)
-# print(b)
-# print(b.shape)
+print(G.nodes)
+print(G.edges)
 
-# c = a.repeat(2,1,1)
-# print(c)
-
-a = torch.randint(1,5,[4,3])
-
-a = a.repeat(1,1,3)
-print(a.shape)
+print(G.adj[1])
+print(G.graph)
