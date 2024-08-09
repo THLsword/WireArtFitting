@@ -1,7 +1,9 @@
 #!/bin/bash
 
-animel=cat
-output_filename=output_${animel}_6v
+animel=ox
+# cat deer2 dog dog2 fox horse ox rabbit
+output_filename=outputs/${animel}_6v
+
 
 python render_utils/single_model_rendering.py \
 --DATA_DIR=./data/models/${animel} \
@@ -9,15 +11,16 @@ python render_utils/single_model_rendering.py \
 
 python render_utils/dataset_alphashape.py \
 --DATA_DIR=./${output_filename}/render_utils/render_outputs \
---SAVE_DIR=./${output_filename}/render_utils/alpha_outputs
+--SAVE_DIR=./${output_filename}/render_utils/alpha_outputs \
+--alpha_size=45.0
 
 python render_utils/alphashape_expand.py \
---expend_size=2 \
+--expend_size=1 \
 --render_DIR=./${output_filename}/render_utils/render_outputs \
 --alphashape_DIR=./${output_filename}/render_utils/alpha_outputs \
 --SAVE_DIR=./${output_filename}/render_utils/expand_outputs
 
-python render_utils/demo_deform.py \
+python render_utils/train.py \
 --DATA_DIR=./data/models/${animel} \
 --GT_DIR=./${output_filename}/render_utils/expand_outputs \
 --SAVE_DIR=./${output_filename}/render_utils/train_outputs 

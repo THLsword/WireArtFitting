@@ -18,15 +18,23 @@ from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
 
+from model.backbone.apes_seg_backbone import APESSeg2Backbone
+from model.head.apes_cls_head import MLP_Head
+
 class Model(nn.Module):
     def __init__(self, template_params, batch_size):
         super(Model, self).__init__()
+        self.backbone = APESSeg2Backbone('local')
         self.batch_size = batch_size
+        self.head = MLP_Head
+
         self.register_buffer('template_params', template_params)
 
         self.register_parameter('displace', nn.Parameter(torch.zeros_like(self.template_params)))
 
-    def forward(self):
+
+    def forward(self, sample_points):
+
         vertices = self.template_params + self.displace
 
         return vertices.repeat(self.batch_size, 1)
@@ -217,6 +225,14 @@ def training(**kwargs):
     template_params, vertex_idx, face_idx, symmetriy_idx, curve_idx = load_template(template_path)
     template_params, vertex_idx, face_idx, symmetriy_idx, curve_idx =\
     template_params.to(device), vertex_idx.to(device), face_idx.to(device), symmetriy_idx.to(device), curve_idx.to(device)
+
+    print(template_params.shape)
+    print(vertex_idx.shape)
+    print(face_idx.shape)
+    print(curve_idx)
+    return 0
+
+
     sample_num = int(np.ceil(np.sqrt(4096/face_idx.shape[0])))
     template_mean = abs(template_params.view(-1,3)).mean(0) # [3]
     template_params = (template_params.view(-1,3) / template_mean * pcd_maen).view(-1)
@@ -227,32 +243,32 @@ def training(**kwargs):
     model = Model(template_params, batch_size).cuda()
     optimizer = torch.optim.Adam(model.parameters(), 0.02, betas=(0.5, 0.99))
 
-    # warm up (template preprocessing)
-    for i in tqdm.tqdm(range(10)):
-        vertices = model()
-        vertices = vertices.view(batch_size,-1,3)
-        patches = vertices[:,face_idx] # (B, face_num, cp_num, 3)
-        curves = vertices[:,curve_idx] # (B, curve_num, cp_num, 3)
-        loss_params = {
-            'vertices':vertices,
-            'patches':patches,
-            'pcd_points':ellipsoid,
-            'sample_num':sample_num,
-            'symmetriy_idx':symmetriy_idx,
-        }
-        loss = compute_warm_up_loss(**loss_params)
+    # # warm up (template preprocessing)
+    # for i in tqdm.tqdm(range(10)):
+    #     vertices = model()
+    #     vertices = vertices.view(batch_size,-1,3)
+    #     patches = vertices[:,face_idx] # (B, face_num, cp_num, 3)
+    #     curves = vertices[:,curve_idx] # (B, curve_num, cp_num, 3)
+    #     loss_params = {
+    #         'vertices':vertices,
+    #         'patches':patches,
+    #         'pcd_points':ellipsoid,
+    #         'sample_num':sample_num,
+    #         'symmetriy_idx':symmetriy_idx,
+    #     }
+    #     loss = compute_warm_up_loss(**loss_params)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    #     optimizer.zero_grad()
+    #     loss.backward()
+    #     optimizer.step()
 
-        if i == 9:
-            with torch.no_grad():
-                os.makedirs(output_path, exist_ok=True)
-                os.makedirs(f"{output_path}/training_save", exist_ok=True)
-                save_obj(f"{output_path}/training_save/pcd.obj", pcd_points)
-                write_obj(f"{output_path}/training_save/warm_up.obj", patches[0], control_point_num)
-                save_obj(f"{output_path}/training_save/ellipsoid.obj", ellipsoid)
+    #     if i == 9:
+    #         with torch.no_grad():
+    #             os.makedirs(output_path, exist_ok=True)
+    #             os.makedirs(f"{output_path}/training_save", exist_ok=True)
+    #             save_obj(f"{output_path}/training_save/pcd.obj", pcd_points)
+    #             write_obj(f"{output_path}/training_save/warm_up.obj", patches[0], control_point_num)
+    #             save_obj(f"{output_path}/training_save/ellipsoid.obj", ellipsoid)
 
     optimizer = torch.optim.Adam(model.parameters(), kwargs['learning_rate'], betas=(0.5, 0.99))
     loop = tqdm.tqdm(list(range(0, kwargs['epoch'])))
@@ -261,6 +277,7 @@ def training(**kwargs):
         vertices = vertices.view(batch_size,-1,3)
         patches = vertices[:,face_idx] # (B, face_num, cp_num, 3)
         curves = vertices[:,curve_idx] # (B, curve_num, cp_num, 3)
+
         loss_params = {
             'vertices':vertices,
             'patches':patches,

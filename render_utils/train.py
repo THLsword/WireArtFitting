@@ -28,6 +28,20 @@ from pytorch3d.renderer import (
 )
 from PIL import Image
 
+def save_img(img,file_name):
+    # img (256,256,3) np array
+    img = img*255
+    img = (img).astype(np.uint8)
+    image = Image.fromarray(img)
+    image.save(file_name)
+
+def save_obj(filename, cps):
+    # cps (p_num, 3)
+    with open(filename, 'w') as file:
+        # 遍历每个点，将其写入文件
+        for point in cps:
+            # 格式化为OBJ文件中的顶点数据行
+            file.write("v {} {} {}\n".format(*point))
 
 class Model(nn.Module):
     def __init__(self, pcd, device):
@@ -43,14 +57,12 @@ class Model(nn.Module):
         # render
         self.views = [45,90,135,225,270,315] # degree of 360
         self.view_num = len(self.views)
-        # self.R, self.T = look_at_view_transform(2.0, 10, 55) 
         self.R, self.T = look_at_view_transform(1.5, 15, self.views) 
         self.raster_settings = PointsRasterizationSettings(
-            image_size=256, 
-            radius = 0.015,
+            image_size=128, 
+            radius = 0.01,
             points_per_pixel = 5
         )
-        # self.cameras = PerspectiveCameras(R=self.R, T=self.T, device='cpu')
         self.cameras = FoVOrthographicCameras(device=device, R=self.R, T=self.T, znear=0.01)
         self.rasterizer=PointsRasterizer(cameras=self.cameras, raster_settings=self.raster_settings)
         self.renderer = PointsRenderer(
@@ -74,63 +86,18 @@ class Model(nn.Module):
         images = self.renderer(point_cloud) # (self.view_num,256,256,3)
         return images, colors_
 
-def neg_iou_loss(predict, target):
-    dims = tuple(range(predict.ndimension())[1:])
-    intersect = (predict * target).sum(dims)
-    union = (predict + target - predict * target).sum(dims) + 1e-6
-    return 1. - (intersect / union).sum() / intersect.nelement()
-
-def save_img(img,file_name):
-    # img (256,256,3) np array
-    img = img*255
-    img = (img).astype(np.uint8)
-    image = Image.fromarray(img)
-    image.save(file_name)
-
 def WeightL1(pred, target):
     pred = pred.sum(dim=-1)/3     # (B,4,256,256,3) -> (B,4,256,256)
     target = target.sum(dim=-1)/3 # (B,4,256,256,3) -> (B,4,256,256)
-    # L1 loss
-    # count_all = torch.sum(target > 0)
-    # L1_loss = torch.abs(pred - target)
-    # L1_loss = L1_loss.sum()/count_all
 
     # count_all = torch.sum((pred <= target) & (target > 0))
     count_all = torch.sum(target > 0)
-    L1_loss = torch.where(pred <= target, (pred - target)*4, (pred - target)*0.5)
+    L1_loss = torch.where(pred <= target, (pred - target)*2, (pred - target)*0.5)
     # L1_loss = pred - target
     L1_loss = L1_loss.abs()
     L1_loss = L1_loss.sum()/count_all
 
     return L1_loss
-
-class attention(nn.Module):
-    def __init__(self, npts_ds = 2048, input_dim = 3, output_dim = 3):
-        super(attention, self).__init__()
-        self.npts_ds = npts_ds
-        self.q_conv = nn.Conv1d(input_dim, output_dim, 1, bias=False)
-        self.k_conv = nn.Conv1d(input_dim, output_dim, 1, bias=False)
-        self.v_conv = nn.Conv1d(input_dim, output_dim, 1, bias=False)
-        self.softmax = nn.Softmax(dim=-1)
-
-    def forward(self, x):
-        q = self.q_conv(x)  # (B, C, N) -> (B, C, N)
-        k = self.k_conv(x)  # (B, C, N) -> (B, C, N)
-        v = self.v_conv(x)  # (B, C, N) -> (B, C, N)
-        energy = rearrange(q, 'B C N -> B N C').contiguous() @ k # (B, N, C) @ (B, C, N) -> (B, N, N)
-        scale_factor = math.sqrt(q.shape[-2])
-        attention = self.softmax(energy / scale_factor)  # (B, N, N) -> (B, N, N)
-        out = attention @ rearrange(v, 'B C N -> B N C').contiguous() # (B, N, N) @ (B, N, C) -> (B, N, C)
-        out = rearrange(out,'B N C -> B C N').contiguous()
-        return out
-
-def save_obj(filename, cps):
-    # cps (p_num, 3)
-    with open(filename, 'w') as file:
-        # 遍历每个点，将其写入文件
-        for point in cps:
-            # 格式化为OBJ文件中的顶点数据行
-            file.write("v {} {} {}\n".format(*point))
 
 def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
     torch.cuda.empty_cache()
@@ -151,30 +118,28 @@ def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
     point_cloud_normalized = point_cloud_centered / max_distance
     pcd_tensor = torch.tensor(point_cloud_normalized).to(torch.float32).to(device)
 
-    # load gt
+    # load gt(expened alpha shape images)
     multi_view_paths = []
     for filename in os.listdir(gt_path):
         if filename.endswith('.png'):
             file_path = os.path.join(gt_path, filename)
             multi_view_paths.append(file_path)
     multi_view_paths.sort()
-    # print(multi_view_paths)
 
     multi_view_imgs = [Image.open(path) for path in multi_view_paths]
     np_imgs = [np.array(img) for img in multi_view_imgs]
     gt_np = [img.astype(np.float32) / 255. for img in np_imgs]
     images_gt = torch.tensor(gt_np).to(device)
 
+    # init
     model = Model(pcd_tensor, device).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), 0.01, betas=(0.5, 0.99))
+    optimizer = torch.optim.Adam(model.parameters(), 0.1, betas=(0.5, 0.99))
     loss_fn = nn.MSELoss(reduction="mean")
 
     loop = tqdm.tqdm(list(range(0, epoch)))
     for i in loop:
         images, colors = model.forward()
-
         loss = WeightL1(images, images_gt)
-        # loss = F.l1_loss(images, images_gt)
 
         loop.set_description('Loss: %.4f' % (loss.item()))
 
@@ -182,17 +147,13 @@ def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
         loss.backward()
         optimizer.step()
 
-        if i % 50 == 0:
+        if (i+1) % 50 == 0:
             for j, image in enumerate(images):
-                save_img(image.detach().cpu().numpy(), f'{output_path}/output_{i}_{j}.png')
-            # save_img(images[0].detach().cpu().numpy(),f'{output_path}/output_{i}_0.png')
-            # save_img(images[1].detach().cpu().numpy(),f'{output_path}/output_{i}_1.png')
-            # save_img(images[2].detach().cpu().numpy(),f'{output_path}/output_{i}_2.png')
-            # save_img(images[3].detach().cpu().numpy(),f'{output_path}/output_{i}_3.png')
+                save_img(image.detach().cpu().numpy(), f'{output_path}/output_{i+1}_{j}.png')
             torch.save(colors, f'{DATA_DIR}/weights.pt')
             torch.save(colors, f'{output_path}/weights.pt')
 
-        if i == epoch - 1:
+        if (i+1) == epoch:
             mask = (colors > 0.5)
             masked_pcd = pcd_tensor[mask]
             save_obj(f'{output_path}/multi_view.obj', masked_pcd)
@@ -206,7 +167,7 @@ if __name__ == '__main__':
     parser.add_argument('--GT_DIR', type=str, default="./render_utils/expand_outputs")
     parser.add_argument('--SAVE_DIR', type=str, default="./render_utils/train_outputs")
     parser.add_argument('--filename', type=str, default="model_normalized_4096.npz")
-    parser.add_argument('--epoch', type=int, default=201)
+    parser.add_argument('--epoch', type=int, default=50)
 
     args = parser.parse_args()
 

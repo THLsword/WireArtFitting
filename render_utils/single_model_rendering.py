@@ -63,12 +63,12 @@ def render_pcd(DATA_DIR,SAVE_DIR,file_path,filename):
         list_T.append(temp_T)
 
     raster_settings = PointsRasterizationSettings(
-        image_size=256, 
-        radius = 0.015,
+        image_size=128, 
+        radius = 0.010,
         points_per_pixel = 5
     )
 
-    for i in range(len(list_R)):
+    for i in tqdm(range(len(list_R))):
         # camera_list.append(PerspectiveCameras(R=list_R[i], T=list_T[i], device=device))
         # cameras = PerspectiveCameras(R=list_R[i], T=list_T[i], device=device)
         cameras = FoVOrthographicCameras(device=device, R=list_R[i], T=list_T[i], znear=0.01)
