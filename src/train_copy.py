@@ -25,7 +25,7 @@ class Model(nn.Module):
     def __init__(self, template_params, batch_size):
         super(Model, self).__init__()
         self.backbone = APESSeg2Backbone('local')
-        self.batch_size = batch_size
+        self.batch_size = batch_size  
         self.head = MLP_Head
 
         self.register_buffer('template_params', template_params)
