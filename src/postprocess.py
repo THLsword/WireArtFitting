@@ -64,11 +64,18 @@ def save_curves(file_name, data):
     save_obj(file_name, obj_points)
 
 def create_bspline(mean_curve_points):
+    print("mean_curve_points:", mean_curve_points.shape)
     k = 3
-    sample_num = 400
+    sample_num = 50
     curves = np.zeros([mean_curve_points.shape[0], sample_num, 3])
     for i, curve in enumerate(mean_curve_points):
-        # curve (140,3) 
+        # curve (n, 3) 
+        # rangeeduce number of sampling points
+        head = curve[0, :]
+        tail = curve[-1, :]
+        middle = curve[1:-1:2, :]
+        curve = torch.vstack((head, middle, tail))
+        # bspline
         curve = curve.numpy()
         _, idxs = np.unique(curve, axis=0, return_index=True)
         unique_curve = curve[np.sort(idxs)]
@@ -131,6 +138,7 @@ def post_processing(**kwargs):
     # curve_cood_list: (96, n, 3)
     #### 
     sampled_pcd, review_idx, curve_idx_list, curve_cood_list = project_curve_to_pcd(curves, pcd_points, batch_size, sample_num, kwargs['k'])
+    print("project to point clod")
 
     # new match method. 
     # [96, 140, k] <-match-> all mv points. 
@@ -151,15 +159,16 @@ def post_processing(**kwargs):
         new_rate.append(rate)
     new_rate = torch.tensor(new_rate)
     curve_thresh_mask = new_rate > kwargs['match_rate']
+    print("curve-multiview matching")
 
     # curve topology
     G, graph_list = create_curve_graph(curve_idx, curve_thresh_mask)
     topology_mask = torch.zeros(curve_idx.shape[0])
     for i in list(G.edges):
         topology_mask[G.edges[i[0],i[1]]['idx']]=1
-    curve_thresh_mask = topology_mask.bool() # [96] or [48]
+    curve_thresh_mask_d = topology_mask.bool() # [96] or [48]
 
-    # get pcd's PCA
+    # get pcd's PCA, Bsplines, and determine different views
     pcd_np = np.array(pcd_points[0])
     pca = PCA(n_components=3)
     pca.fit(pcd_np)
@@ -198,19 +207,27 @@ def post_processing(**kwargs):
     for i in list(G.edges):
         curve_thresh_mask2[G.edges[i[0], i[1]]['idx']] = True
 
-    # create/output new curves
-    # curves_points_idx = (96, 140, k), pcd_points = (n, 3)
+    # ------------------------------------------------------------------------------------
+    ## create/output new curves
+    ## curves_points_idx = (96, 140, k), pcd_points = (n, 3)
+    print("save objs")
     output_curves = pcd_points[0][curves_points_idx][curve_thresh_mask] # (96, 140, k, 3)
     mean_curve_points = output_curves.mean(dim=2) # (n_matched, 140, 3)
     bspline = create_bspline(mean_curve_points)
+    save_obj(f"{output_path}/output_bspline0.obj", bspline.reshape(-1,3))
+    
+    
+    output_curves = pcd_points[0][curves_points_idx][curve_thresh_mask_d] # (96, 140, k, 3)
+    mean_curve_points = output_curves.mean(dim=2) # (96, 140, k, 3) -> (n_matched, 140, 3)
+    bspline = create_bspline(mean_curve_points)
     save_obj(f"{output_path}/output_bspline1.obj", bspline.reshape(-1,3))
 
-    output_curves = pcd_points[0][curves_points_idx][curve_thresh_mask2] # (96, 140, k, 3)
-    mean_curve_points = output_curves.mean(dim=2) # (n_matched, 140, 3)
-    bspline = create_bspline(mean_curve_points)
-    save_obj(f"{output_path}/output_bspline2.obj", bspline.reshape(-1,3))
+    # output_curves = pcd_points[0][curves_points_idx][curve_thresh_mask2] # (96, 140, k, 3)
+    # mean_curve_points = output_curves.mean(dim=2) # (n_matched, 140, 3)
+    # bspline = create_bspline(mean_curve_points)
+    # save_obj(f"{output_path}/output_bspline2.obj", bspline.reshape(-1,3))
 
-    save_curves(f"{output_path}/output_curves.obj", mean_curve_points)
+    # save_curves(f"{output_path}/output_curves.obj", mean_curve_points)
     save_obj(f"{output_path}/sampled_pcd.obj", sampled_pcd)
 
 if __name__ == '__main__':
@@ -226,7 +243,7 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, default="0.01")
 
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
-    parser.add_argument('--k', type=int, default=3) # 裡curve採樣點最近的k個點
+    parser.add_argument('--k', type=int, default=5) # 裡curve採樣點最近的k個點
     parser.add_argument('--match_rate', type=float, default=0.4) 
 
     parser.add_argument('--IOU_thres', type=float, default=0.8) 

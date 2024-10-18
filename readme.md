@@ -6,6 +6,11 @@
 - 前面三部都做好的話直接運行 demo_deform.py(train)
 
 ## training 權重以及影響
+- 增加神經網絡
+    - linear -> apes -> feature -> MLP
+    - 每一個epoch會對input pcd進行點的順序打亂
+
+
 - chamfer_loss
     - 1
 - overlap_loss
@@ -41,3 +46,10 @@
 - horse: 後腳完全沒有分離，並且扭曲重疊翻轉
 
 # post-process
+- 尋找curves samplepoints在GT上的最近k個點，做為投影
+- 投影後得到 [curve num, curve sample num, k]。
+    - 這個矩陣是投影點在GT上的idx
+- 計算match rate
+    - 即一個curve的采樣點，有多少能夠投影到multi view points上
+- 通過pca計算兩個主方向的長度 -> 決定幾個旋轉矩陣的角度
+- 旋轉 -> 計算IOU -> 刪除不需要的curve -> 繼續

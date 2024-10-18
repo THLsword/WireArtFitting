@@ -1,6 +1,6 @@
 #!/bin/bash
 
-animel=ox
+animel='bottles1'
 # cat deer2 dog dog2 fox horse ox rabbit
 output_filename=outputs/${animel}_6v
 
@@ -25,7 +25,7 @@ python render_utils/train.py \
 --GT_DIR=./${output_filename}/render_utils/expand_outputs \
 --SAVE_DIR=./${output_filename}/render_utils/train_outputs 
 
-python src/train.py       \
+python src/train_copy_pcd.py       \
 --model_path=./data/models/${animel} \
 --output_path=./${output_filename} \
 --mv_path=./${output_filename}/render_utils/train_outputs \

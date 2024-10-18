@@ -3,9 +3,9 @@ from pytorch3d.ops.knn import knn_gather, knn_points
 
 
 def area_weighted_chamfer_loss(
-    mtds, # [b, patch, cp]
-    points, # [b, patch, cp, 3]
-    normals, # [b, patch, cp, 3]
+    mtds,    # [b, patch, sample_num]
+    points,  # [b, patch, sample_num, 3]
+    normals, # [b, patch, sample_num, 3]
     pcd_points, # [b, 4096, 3]
     target_normals,
     chamfer_weight_rate,
@@ -23,14 +23,14 @@ def area_weighted_chamfer_loss(
 
     # chamfer weights, The further away, the greater the weight
     mean_dis = dis_to_center.mean(1) # [b] # dis_to_center [b, n_sample_points]
-    mean_gt_dis = gt_to_center.mean(1)     # gt_to_center  [b, n_mesh_points]``
+    mean_gt_dis = gt_to_center.mean(1)     # gt_to_center  [b, n_mesh_points]
     distance_weight    = (torch.max(torch.tensor(0.).to(mtds),(dis_to_center-mean_dis).unsqueeze(1)) * 0.2 + torch.ones_like(dis_to_center).to(dis_to_center)).detach()
     distance_weight_gt = (torch.max(torch.tensor(0.).to(mtds),(gt_to_center-mean_gt_dis).unsqueeze(1)) * 0.2 + torch.ones_like(gt_to_center).to(gt_to_center)).detach()
 
     chamferloss_a, idx_a = distances.min(2)  # [b, n_sample_points]
     chamferloss_b, idx_b = distances.min(1)  # [b, n_mesh_points] 4096
-    # if multi_view_weights != None:
-    #     chamferloss_b = chamferloss_b * multi_view_weights
+    if multi_view_weights != None:
+        chamferloss_b = chamferloss_b * multi_view_weights
 
     if compute_normals:
         normals = normals.view(b, -1, 3)
@@ -55,7 +55,6 @@ def area_weighted_chamfer_loss(
 
     mtds = mtds.view(b, -1)
     chamferloss_a = torch.sum(mtds*chamferloss_a*distance_weight, dim=-1) / mtds.sum(-1) # [b]
-    # chamferloss_a = torch.sum(mtds*chamferloss_a*distance_weight, dim=-1) / 2000 # [b]
     chamferloss_b = (chamferloss_b*distance_weight_gt).mean(1) # [b]
     chamfer_loss = ((chamferloss_a+chamferloss_b).mean() / 2).view(1)
     

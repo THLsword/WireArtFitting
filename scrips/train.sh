@@ -1,9 +1,9 @@
 #!/bin/bash
 
-animel='cat'
+animel='rabbit'
 output_filename=outputs/${animel}_6v
 
-python src/train_copy.py       \
+python src/train_copy_pcd.py       \
 --model_path=./data/models/${animel} \
 --output_path=./${output_filename} \
 --mv_path=./${output_filename}/render_utils/train_outputs \
@@ -14,3 +14,9 @@ python src/train_copy.py       \
 # --output_path=./${output_filename} \
 # --mv_path=./${output_filename}/render_utils/train_outputs \
 # --match_rate=0.6
+
+python src/post_perceptual.py \
+--model_path=./data/models/${animel} \
+--output_path=./${output_filename} \
+--mv_path=./${output_filename}/render_utils/train_outputs \
+--object_curve_num=20

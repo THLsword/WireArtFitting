@@ -8,7 +8,13 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 def load_npz(file_path):
-    npz_path = os.path.join(file_path, "model_normalized_4096.npz")
+    npz_path = ''
+    if os.path.exists(os.path.join(file_path, "model_normalized_4096.npz")):
+        npz_path = os.path.join(file_path, "model_normalized_4096.npz")
+    elif os.path.exists(os.path.join(file_path, "model_normalized_5000.npz")):
+        npz_path = os.path.join(file_path, "model_normalized_5000.npz")
+    else:
+        raise FileNotFoundError(f"model.npz文件不存在。")
     npzfile = np.load(npz_path)
     points = npzfile['points']
     normals = npzfile['normals']

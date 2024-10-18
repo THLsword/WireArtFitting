@@ -1,31 +1,23 @@
-import os
-import tqdm
-import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
-import numpy as np
-import argparse
-from einops import rearrange, repeat
+import torch.optim as optim
+import os
+from src.utils.postprocess_utils import render
 from PIL import Image
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.interpolate import BSpline
+import numpy as np
+import alphashape
+import threading
+import psutil
+import time
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 import networkx as nx
 
-G = nx.Graph()
-G.add_node(1)
-G.add_node(2)
-G.add_node(3)
-G.add_node(4)
-G.graph['1']='1'
-G.add_edge(1, 2)
-G.add_edge(1, 3)
-G.add_edge(1, 4)
-G.add_edge(2, 3)
+a = torch.tensor([[1,2,3],[1,2,3],[1,2,4]])
+a_nui = torch.max(a, dim=0)
 
-print(G.nodes)
-print(G.edges)
+print(a)
+print(a_nui)
 
-print(G.adj[1])
-print(G.graph)
+b = np.array([])
+print(b)

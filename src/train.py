@@ -4,6 +4,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim.lr_scheduler import LambdaLR
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
@@ -30,6 +31,14 @@ class Model(nn.Module):
         vertices = self.template_params + self.displace
 
         return vertices.repeat(self.batch_size, 1)
+
+def lr_lambda(epoch):
+    warm_epoch = 20
+    if epoch < warm_epoch:
+        return (epoch + 1) / warm_epoch
+    else:
+        return 0.99 ** (epoch - warm_epoch)
+
 
 def compute_warm_up_loss(vertices, patches, pcd_points, sample_num, symmetriy_idx):
     batch_size = patches.shape[0]
@@ -202,8 +211,8 @@ def training(**kwargs):
     weight_path = os.path.join(mv_path, 'weights.pt')
     if os.path.exists(weight_path):
         mview_weights_ = torch.load(f'{model_path}/weights.pt')
-        # 0~1 -> 1~2
-        mview_weights = (mview_weights_/4 + 1).detach()
+        # 0~1 -> -0.25~0.25
+        mview_weights = (mview_weights_/2 - 0.25).detach()
         mview_weights.requires_grad_(False)
     else:
         print(f"{weight_path} doesn't exist, mview_weights = None")
@@ -256,11 +265,14 @@ def training(**kwargs):
 
     optimizer = torch.optim.Adam(model.parameters(), kwargs['learning_rate'], betas=(0.5, 0.99))
     loop = tqdm.tqdm(list(range(0, kwargs['epoch'])))
+    scheduler = LambdaLR(optimizer, lr_lambda)
+
     for i in loop:
         vertices = model()
         vertices = vertices.view(batch_size,-1,3)
         patches = vertices[:,face_idx] # (B, face_num, cp_num, 3)
         curves = vertices[:,curve_idx] # (B, curve_num, cp_num, 3)
+        mview_weights = 1 + (mview_weights * i / kwargs['epoch']) # 0.75~1.25
         loss_params = {
             'vertices':vertices,
             'patches':patches,
@@ -281,6 +293,7 @@ def training(**kwargs):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         if i % 50 == 0 or i == kwargs['epoch'] - 1:
             with torch.no_grad():

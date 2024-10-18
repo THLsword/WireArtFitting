@@ -33,7 +33,8 @@ class APESSeg2Backbone(nn.Module):
         self.conv1 = nn.Sequential(nn.Conv1d(128, 1024, 1, bias=False), nn.BatchNorm1d(1024), nn.LeakyReLU(0.2))
         self.conv2 = nn.Sequential(nn.Conv1d(16, 64, 1, bias=False), nn.BatchNorm1d(64), nn.LeakyReLU(0.2))
 
-    def forward(self, x, shape_class):
+    def forward(self, x):
+        pcd_num = x.shape[2]
         tmp = self.embedding(x)  # (B, 3, 2048) -> (B, 128, 2048)
         x1 = self.n2p_attention1(tmp)  # (B, 128, 2048) -> (B, 128, 2048)
         tmp = self.ds1(x1)  # (B, 128, 2048) -> (B, 128, 1024)
@@ -50,8 +51,6 @@ class APESSeg2Backbone(nn.Module):
         x_max = reduce(x, 'B C N -> B C', 'max')  # (B, 1024, 2048) -> (B, 1024)
         x_avg = reduce(x, 'B C N -> B C', 'mean')  # (B, 1024, 2048) -> (B, 1024)
         x, _ = pack([x_max, x_avg], 'B *')  # (B, 1024) -> (B, 2048)
-        shape_class = self.conv2(shape_class)  # (B, 16, 1) -> (B, 64, 1)
-        x, _ = pack([x, shape_class], 'B *')  # (B, 2048) -> (B, 2112)
-        x = repeat(x, 'B C -> B C N', N=2048)  # (B, 2112) -> (B, 2112, 2048)
-        x, _ = pack([x, x1], 'B * N')  # (B, 2112, 2048) -> (B, 2240, 2048)
+        x = repeat(x, 'B C -> B C N', N=pcd_num)  # (B, 2048) -> (B, 2048, 2048)
+        x, _ = pack([x, x1], 'B * N')  # (B, 2048, 2048) -> (B, 2048+128, 2048)
         return x
