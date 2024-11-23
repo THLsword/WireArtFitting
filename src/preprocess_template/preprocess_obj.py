@@ -116,10 +116,13 @@ def write_adjacencies(faces, output_dir):
         f.write("\n")
 
 if __name__ == '__main__':
+    # 在開始前，先用txt打開obj，把除了v和f的都刪掉(vt,vn)
+
+
     parser = argparse.ArgumentParser(description = 'Preprocess template .obj data.')
-    parser.add_argument('--data-path', type = str, default = 'data/templates/sphere96/96face.obj',
+    parser.add_argument('--data-path', type = str, default = 'data/templates/cube24/cube_24.obj',
 					    help = 'Path of template .obj data.')
-    parser.add_argument('--output-dir', type = str, default = 'data/templates/sphere96',
+    parser.add_argument('--output-dir', type = str, default = 'data/templates/cube24',
 					    help = 'Directory path of output datas.')          
     args = parser.parse_args()
     

@@ -18,9 +18,10 @@ from utils.patch_utils import *
 from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
+from model.utils.layers import Embedding_
 
 from model.backbone.apes_seg_backbone import APESSeg2Backbone
-from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp
+from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp, simple_mlp_
 from model.head.apes_cls_head import MLP_Head
 from model.utils.layers import UpSample
 
@@ -43,8 +44,10 @@ class Model(nn.Module):
         self.register_buffer('template_params', template_params) # (B, 122, 3)
         self.cp_num = self.template_params.shape[1] * self.template_params.shape[2]
 
+        self.embedding = Embedding_()
+
         self.simple_MLP  = simple_mlp()
-        self.simple_MLP2 = simple_mlp() 
+        self.simple_MLP2 = simple_mlp_() 
         self.upsample = UpSample()
 
         self.head = MLP_Head()
@@ -53,12 +56,16 @@ class Model(nn.Module):
         pcd = torch.transpose(pcd, 1, 2) # (B, N, 3) -> (B, 3, N)
         mv_points = torch.transpose(mv_points, 1, 2) # (B, M, 3) -> (B, 3, M)
 
-        pcd_feature = self.simple_MLP(pcd) # (B, C, N)
+        pcd_feature = self.embedding(pcd)
+        pcd_feature = self.simple_MLP(pcd_feature) # (B, C, N)
         output = self.head(pcd_feature) # (B, C, N) -> (B, 366)
 
-        ds_feature = self.simple_MLP2(mv_points) # (B, C, N)
+        # ---- 註釋掉就沒有cross attention
+        ds_feature = self.embedding(mv_points)
+        ds_feature = self.simple_MLP2(ds_feature) # (B, C, N)
         temp = self.upsample(pcd_feature, ds_feature) # (B, C, N)
         output = self.head(temp)
+        # ---- 註釋掉就沒有cross attention
         
         output = rearrange(output, 'B (M N) -> B M N', N = 3)
         output = self.template_params + output
@@ -132,7 +139,7 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, m
     curves_s_num = 16
     linspace = torch.linspace(0, 1, curves_s_num).to(curves).flatten()[..., None]
     curve_points = bezier_sample(linspace, curves)
-    curve_chamfer_loss, _, _, _ = curve_chamfer(curve_points, pcd_points)
+    curve_chamfer_loss, _, _, _ = curve_chamfer(curve_points, pcd_points*1.01)
     curve_chamfer_loss = curve_chamfer_loss.mean(1)
 
     # multi view curve loss
@@ -142,21 +149,21 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, m
     # flatness loss
     planar_loss = planar_patch_loss(st, points, mtds)
 
-    # # Conciseness loss
-    # overlap_loss = patch_overlap_loss(mtds, pcd_area)
+    # Conciseness loss
+    overlap_loss = patch_overlap_loss(mtds, pcd_area)
 
     # Orthogonality loss
     perpendicular_loss = curve_perpendicular_loss(patches)
 
-    # flatness loss
-    FA_loss = flatness_area_loss(st, points, mtds)
+    # # flatness loss
+    # FA_loss = flatness_area_loss(st, points, mtds)
 
     # symmetry loss
     symmetry_loss = torch.zeros(1).to(patches)
     symmetry_loss = patch_symmetry_loss(symmetriy_idx[0], symmetriy_idx[1], vertices)
 
-    # # curvature loss
-    # curvature_loss = curve_curvature_loss(curves, linspace)
+    # curvature loss
+    curvature_loss = curve_curvature_loss(curves, linspace)
 
     # beam gap loss
     thres = 0.9
@@ -176,13 +183,14 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, m
     #             #+ 0.05 * mv_curve_loss \
 
     # test loss
-    stable_loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss + normal_loss + 0.2 * beam_gap_loss# + 0.012 * curvature_loss
+    # stable_loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss + normal_loss + 0.2 * beam_gap_loss
+    stable_loss =  chamfer_loss + 2.3 *planar_loss + 0.1*symmetry_loss + 0.7*normal_loss + 0.20 * beam_gap_loss# + 0.002 * curvature_loss# + 0.005*overlap_loss
     loss = stable_loss
 
     return loss.mean()
 
 def save_img(img,file_name):
-    # img (256,256,3) np array
+    # img (256,256,3) np array``
     img = img*255
     img = (img).astype(np.uint8)
     image = Image.fromarray(img)
@@ -254,7 +262,7 @@ def training(**kwargs):
     if os.path.exists(weight_path):
         mview_weights_ = torch.load(f'{model_path}/weights.pt')
         # 0~1 -> -0.25~0.25
-        mview_weights = ((mview_weights_ - 0.5)/3).detach()
+        mview_weights = ((mview_weights_ - 0.5)/2).detach()
         mview_weights.requires_grad_(False)
     else:
         print(f"{weight_path} doesn't exist, mview_weights = None")
@@ -278,41 +286,13 @@ def training(**kwargs):
     # resize template(to be similar in size)
     template_mean = abs(template_params.view(-1,3)).mean(0) # [3]
     template_params = (template_params.view(-1,3) / template_mean * pcd_maen)
-    template_params = template_params.repeat(batch_size, 1, 1)
+    template_params = template_params.view(-1,3).repeat(batch_size, 1, 1)
 
     # train
     batch_size = kwargs['batch_size']
     control_point_num = 4
     model_warmup = Model_warmup(template_params, batch_size).cuda()
     optimizer = torch.optim.Adam(model_warmup.parameters(), 0.02, betas=(0.5, 0.99))
-
-    # # warm up (template preprocessing)
-    # for i in tqdm.tqdm(range(10)):
-    #     vertices = model_warmup() # model is changed!!!!!
-    #     vertices = vertices.repeat(batch_size,1,1)
-    #     patches = vertices[:,face_idx] # (B, face_num, cp_num, 3)
-    #     curves = vertices[:,curve_idx] # (B, curve_num, cp_num, 3)
-    #     loss_params = {
-    #         'vertices':vertices,
-    #         'patches':patches,
-    #         'pcd_points':ellipsoid,
-    #         'sample_num':sample_num,
-    #         'symmetriy_idx':symmetriy_idx,
-    #     }
-    #     loss = compute_warm_up_loss(**loss_params)
-
-    #     optimizer.zero_grad()
-    #     loss.backward()
-    #     optimizer.step()
-
-    #     if i == 9:
-    #         with torch.no_grad():
-    #             template_params = vertices
-    #             os.makedirs(output_path, exist_ok=True)
-    #             os.makedirs(f"{output_path}/training_save", exist_ok=True)
-    #             save_obj(f"{output_path}/training_save/pcd.obj", pcd_points)
-    #             write_obj(f"{output_path}/training_save/warm_up.obj", patches[0], control_point_num)
-    #             save_obj(f"{output_path}/training_save/ellipsoid.obj", ellipsoid)
 
     model = Model(template_params).cuda()
     optimizer = torch.optim.Adam(model.parameters(), kwargs['learning_rate'], betas=(0.5, 0.99))
@@ -357,6 +337,11 @@ def training(**kwargs):
                 write_curve_points(f"{output_path}/training_save/{i}_curve.obj", curves[0], control_point_num)
                 write_obj(f"{output_path}/training_save/{i}_mesh.obj", patches[0], control_point_num)
 
+                # save every patch
+                if i == kwargs['epoch'] - 1:
+                    for j, patch in enumerate(patches[0]):
+                        write_obj(f"{output_path}/training_save/patch{j}.obj", patch.unsqueeze(0), control_point_num)
+
                 # curve probability
                 # curves (b, curve_num, cp_num, 3)
                 curve_sample_num = 16
@@ -369,6 +354,10 @@ def training(**kwargs):
 
                 # save nn model
                 torch.save(model, f"{output_path}/model_weights.pth")
+
+                # save pcd
+                save_obj(f"{output_path}/training_save/pcd.obj", pcd_points)
+                
 
 if __name__ == '__main__':
     # ` python src/train.py `

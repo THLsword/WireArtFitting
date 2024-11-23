@@ -28,12 +28,13 @@ from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
 from utils.postprocess_utils import get_unique_curve, project_curve_to_pcd, delete_single_curve, create_curve_graph, find_deletable_edges, compute_IOU
-
+from utils.create_mesh import create_mesh
 
 from model.backbone.apes_seg_backbone import APESSeg2Backbone
-from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp
+from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp, simple_mlp_
 from model.head.apes_cls_head import MLP_Head
-from model.utils.layers import UpSample
+from model.utils.layers import UpSample, Embedding_
+
 
 class Model(nn.Module):
     def __init__(self, template_params):
@@ -41,8 +42,10 @@ class Model(nn.Module):
         self.register_buffer('template_params', template_params) # (B, 122, 3)
         self.cp_num = self.template_params.shape[1] * self.template_params.shape[2]
 
+        self.embedding = Embedding_()
+
         self.simple_MLP  = simple_mlp()
-        self.simple_MLP2 = simple_mlp() 
+        self.simple_MLP2 = simple_mlp_() 
         self.upsample = UpSample()
 
         self.head = MLP_Head()
@@ -51,12 +54,16 @@ class Model(nn.Module):
         pcd = torch.transpose(pcd, 1, 2) # (B, N, 3) -> (B, 3, N)
         mv_points = torch.transpose(mv_points, 1, 2) # (B, M, 3) -> (B, 3, M)
 
-        pcd_feature = self.simple_MLP(pcd) # (B, C, N)
-        # output = self.head(pcd_feature) # (B, C, N) -> (B, 366)
+        pcd_feature = self.embedding(pcd)
+        pcd_feature = self.simple_MLP(pcd_feature) # (B, C, N)
+        output = self.head(pcd_feature) # (B, C, N) -> (B, 366)
 
-        ds_feature = self.simple_MLP2(mv_points) # (B, C, N)
+        # ---- 註釋掉就沒有cross attention
+        ds_feature = self.embedding(mv_points)
+        ds_feature = self.simple_MLP2(ds_feature) # (B, C, N)
         temp = self.upsample(pcd_feature, ds_feature) # (B, C, N)
         output = self.head(temp)
+        # ---- 註釋掉就沒有cross attention
         
         output = rearrange(output, 'B (M N) -> B M N', N = 3)
         output = self.template_params + output
@@ -74,7 +81,7 @@ def save_obj(filename, points):
 def create_bspline(mean_curve_points):
     print("mean_curve_points:", mean_curve_points.shape)
     k = 3
-    sample_num = 100
+    sample_num = 50
     curves = np.zeros([mean_curve_points.shape[0], sample_num, 3])
     for i, curve in enumerate(mean_curve_points):
         # curve (n, 3) 
@@ -88,7 +95,7 @@ def create_bspline(mean_curve_points):
         _, idxs = np.unique(curve, axis=0, return_index=True)
         unique_curve = curve[np.sort(idxs)]
         cp_num = unique_curve.shape[0]
-        k = int(cp_num/3)
+        k = min(3,cp_num-1)
         m = k + cp_num + 1
         t = np.linspace(0, 1, m-2*k)
         t = np.concatenate(([t[0]]*k, t, [t[-1]]*k))
@@ -240,6 +247,8 @@ def training(**kwargs):
         mview_weights = None
 
     # multi-view points sample from pcd
+    mv_mask = mview_weights_>0.5
+    print(mv_mask.sum())
     mv_points = multiview_sample(pcd_points, mview_weights_) # (M, 3)
 
     # load template
@@ -283,21 +292,22 @@ def training(**kwargs):
     #### 
     sampled_pcd, review_idx, curve_idx_list, curve_cood_list = project_curve_to_pcd(curves, pcd_points.repeat(batch_size,1,1), batch_size, sample_num, kwargs['k'])
     print("project to point clod")
+    save_obj(f"{output_path}/sampled_pcd.obj", sampled_pcd)
 
-    # 距離原點超過平均距離的curves
-    further_curves = []
-    distance_map = torch.zeros(len(curve_cood_list), dtype=torch.bool)
-    for i, curve in enumerate(curve_cood_list):
-        dis_temp = torch.norm(curve, dim=1)
-        condition = dis_temp > average_distance
-        count = torch.sum(condition)
-        result = count > (dis_temp.size(0) / 3)
-        distance_map[i] = result
-        if result:
-            further_curves.append(curve)
-    print("further_curves num: ", len(further_curves))
-    further_curves_tensor = torch.cat(further_curves)
-    save_obj(f"{output_path}/further_curves.obj", further_curves_tensor)
+    # # 距離原點超過平均距離的curves
+    # further_curves = []
+    # distance_map = torch.zeros(len(curve_cood_list), dtype=torch.bool)
+    # for i, curve in enumerate(curve_cood_list):
+    #     dis_temp = torch.norm(curve, dim=1)
+    #     condition = dis_temp > average_distance
+    #     count = torch.sum(condition)
+    #     result = count > (dis_temp.size(0) / 3)
+    #     distance_map[i] = result
+    #     if result:
+    #         further_curves.append(curve)
+    # print("further_curves num: ", len(further_curves))
+    # further_curves_tensor = torch.cat(further_curves)
+    # save_obj(f"{output_path}/further_curves.obj", further_curves_tensor)
 
     # get pcd's PCA, Bsplines, and determine different views
     pcd_np = np.array(pcd_points)
@@ -310,7 +320,8 @@ def training(**kwargs):
     pca_x, pca_y, pca_z = np.max(transformed_data, axis=0) + np.abs(np.min(transformed_data, axis=0))
 
     # rotate matrix (will project to yz plane)
-    rotate_y_angels = [0.0, np.arctan2(pca_z*1.5, pca_x), np.pi/2, np.pi-np.arctan2(pca_z*1.5, pca_x)]
+    # rotate_y_angels = [0.0, np.arctan2(pca_z*1.5, pca_x), np.pi/2, np.pi-np.arctan2(pca_z*1.5, pca_x)]
+    rotate_y_angels = [-np.pi*0.33, 0.0, np.pi*0.33, np.pi/2, np.pi - np.pi*0.33]
     rotate_matrix = []
     for i in rotate_y_angels:
         matrix = np.array([
@@ -328,28 +339,29 @@ def training(**kwargs):
     rotate_matrix = np.stack(rotate_matrix)
 
     # compute perceptual loss
-    cross_attention = True
+    cross_attention = kwargs['crossattention']
     total_curve_unm = review_idx.shape[0]
     # object_curve_num = int(total_curve_unm/1.7)
     object_curve_num = kwargs['object_curve_num']
 
-    pcd_feature = model.simple_MLP(pcd_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)) #[1, 3, 4096] -> [1, 128, 4096]
-    mv_feature = model.simple_MLP2(mv_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device))
+    pcd_feature = model.simple_MLP(model.embedding(pcd_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device))) #[1, 3, 4096] -> [1, 128, 4096]
+    mv_feature = model.simple_MLP2(model.embedding(mv_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
 
     if cross_attention:  
         pcd_feature = model.upsample(pcd_feature, mv_feature)
-    else:
-        pcd_feature = model.upsample(pcd_feature, mv_feature)
-        # pcd_feature, _ = pcd_feature.max(dim = 2)
+    # else:
+    #     pcd_feature = model.upsample(pcd_feature, mv_feature)
+    #     pcd_feature, _ = pcd_feature.max(dim = 2)
     
     
     # render & alphashape before remove curves
     image_size = 128
     alpha_value = kwargs['alpha_value']
-    bspline_remian = transformed_bspline.reshape((-1,3))
+    # bspline_remian = transformed_bspline.reshape((-1,3))
+    bspline_remian = all_bspline.reshape((-1,3))
     data_list = []
     for i, value in enumerate(rotate_matrix):
-        data_list.append({'bspline_remian':bspline_remian, 'rotate_matrix':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':True})
+        data_list.append({'bspline_remian':bspline_remian, 'rotate_matrix':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':False})
     with ProcessPoolExecutor(max_workers=len(rotate_matrix)) as executor:
         as_results = list(executor.map(render, data_list)) # list [(area,length),...,(area,length)]
     area_bd   = [] # area before deleting
@@ -385,8 +397,18 @@ def training(**kwargs):
                 if idx_list != j:
                     for l in idx_list:
                         remain_idx_list.append(l)
+
             curves_ramian_ = [curves_ramian[k] for k in remain_idx_list]
+            curves_idx_ramian_ = [curve_idx_list[k] for k in remain_idx_list] # idx of points in each curves
             temp_points = torch.unique(torch.cat(curves_ramian_), dim=0)
+            temp_idxs = torch.unique(torch.cat(curves_idx_ramian_), dim=0)
+
+            # 對mv points求mask，刪掉的店在mv points中也同樣刪除
+            mask1 = torch.zeros(pcd_points.shape[0], dtype=torch.bool)
+            mask1[temp_idxs] = True
+            result_mask = mask1 & mv_mask.to('cpu')
+            masked_mvpoints = pcd_points[result_mask]
+
             # 隨機重複點，直到填滿[4096,3] & shuffle
             indices = torch.randint(0, temp_points.size(0), (pcd_points.shape[0]-temp_points.shape[0],)) 
             temp_points = torch.cat((temp_points, temp_points[indices]), dim=0)
@@ -394,10 +416,18 @@ def training(**kwargs):
             temp_points = temp_points[indices]
             noise = torch.normal(mean=0.0, std=0.001, size=temp_points.shape)
             temp_points = temp_points + noise
+
+            # 隨機重複點，填滿masked mv points
+            indices = torch.randint(0, masked_mvpoints.size(0), (mv_points.shape[0]-masked_mvpoints.shape[0],)) 
+            masked_mvpoints = torch.cat((masked_mvpoints, masked_mvpoints[indices]), dim=0)
+            indices = torch.randperm(masked_mvpoints.size(0))  # 生成一个从 0 到 4095 的随机排列索引
+            masked_mvpoints = masked_mvpoints[indices]
+
             # model inference
-            samplepcd_feature = model.simple_MLP(temp_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device))
+            samplepcd_feature = model.simple_MLP(model.embedding(temp_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+            samplepcd_mv_feature = model.simple_MLP2(model.embedding(masked_mvpoints.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
             if cross_attention: 
-                samplepcd_feature = model.upsample(samplepcd_feature, mv_feature)
+                samplepcd_feature = model.upsample(samplepcd_feature, samplepcd_mv_feature)
             # else:
             #     samplepcd_feature, _ = samplepcd_feature.max(dim = 2)
 
@@ -438,7 +468,8 @@ def training(**kwargs):
                 if idx_list != j:
                     for l in idx_list:
                         remain_idx_list.append(l)
-            bspline_remian = transformed_bspline[remain_idx_list].reshape((-1,3))
+            # bspline_remian = transformed_bspline[remain_idx_list].reshape((-1,3))
+            bspline_remian = all_bspline[remain_idx_list].reshape((-1,3))
             data_list = []
             area_ad   = []
             length_ad = []
@@ -481,6 +512,7 @@ def training(**kwargs):
     curves_ramian_tensor = torch.cat([curves_ramian[k] for k in remain_idx_list])
     bspline_remian = all_bspline[remain_idx_list].reshape((-1,3))
     print('object_curve_num: ', object_curve_num)
+    create_mesh(all_bspline[remain_idx_list], 0.003, output_path)
     save_obj(f"{output_path}/sampled_pcd_perceptual.obj", curves_ramian_tensor)
     save_obj(f"{output_path}/spline_perceptual.obj", bspline_remian)
         
@@ -500,9 +532,10 @@ if __name__ == '__main__':
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
     parser.add_argument('--k', type=int, default=10) # 裡curve採樣點最近的k個點
     parser.add_argument('--match_rate', type=float, default=0.2) 
-    parser.add_argument('--alpha_value', type=float, default=0.5) 
-    parser.add_argument('--object_curve_num', type=float, default=20) 
-    parser.add_argument('--mv_thresh', type=float, default=0.12)
+    parser.add_argument('--alpha_value', type=float, default=0.3) 
+    parser.add_argument('--object_curve_num', type=float, default=25) 
+    parser.add_argument('--mv_thresh', type=float, default=0.10)
+    parser.add_argument('--crossattention', type=bool, default=True)
 
     args = parser.parse_args()
     training(**vars(args))

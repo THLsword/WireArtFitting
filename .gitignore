@@ -1,2 +1,5 @@
 /output*
 test.py
+/data/Animal
+/data/exosk-data
+/IoU_eval/outputs

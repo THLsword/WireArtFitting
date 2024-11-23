@@ -41,7 +41,31 @@ class Embedding(nn.Module):
         x = torch.cat(x_list, dim=1)  # (B, C=128, N)
         return x
 
+class Embedding_(nn.Module):
+    def __init__(self):
+        super(Embedding_, self).__init__()
+        self.K = 8
+        self.group_type = 'center_diff'
+        self.conv1 = nn.Sequential(nn.Conv2d(6, 128, 1, bias=False), nn.BatchNorm2d(128), nn.LeakyReLU(0.2))
+        self.conv2 = nn.Sequential(nn.Conv2d(128, 64, 1, bias=False), nn.BatchNorm2d(64), nn.LeakyReLU(0.2))
+        self.conv3 = nn.Sequential(nn.Conv2d(128, 128, 1, bias=False), nn.BatchNorm2d(128), nn.LeakyReLU(0.2))
+        self.conv4 = nn.Sequential(nn.Conv2d(128, 64, 1, bias=False), nn.BatchNorm2d(64), nn.LeakyReLU(0.2))
 
+    def forward(self, x):
+        x_list = []
+        x = ops.group(x, self.K, self.group_type)  # (B, C=3, N) -> (B, C=6, N, K)
+        x = self.conv1(x)  # (B, C=6, N, K) -> (B, C=128, N, K)
+        x = self.conv2(x)  # (B, C=128, N, K) -> (B, C=64, N, K)
+        x = x.max(dim=-1, keepdim=False)[0]  # (B, C=64, N, K) -> (B, C=64, N)
+        x_list.append(x)
+        x = ops.group(x, self.K, self.group_type)  # (B, C=64, N) -> (B, C=128, N, K)
+        x = self.conv3(x)  # (B, C=128, N, K) -> (B, C=128, N, K)
+        x = self.conv4(x)  # (B, C=128, N, K) -> (B, C=64, N, K)
+        x = x.max(dim=-1, keepdim=False)[0]  # (B, C=64, N, K) -> (B, C=64, N)
+        x_list.append(x)
+        x = torch.cat(x_list, dim=1)  # (B, C=128, N)
+        return x
+    
 class N2PAttention(nn.Module):
     def __init__(self):
         super(N2PAttention, self).__init__()

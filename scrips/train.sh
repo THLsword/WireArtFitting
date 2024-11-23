@@ -1,13 +1,14 @@
 #!/bin/bash
 
-animel='rabbit'
+animel='dog2'
 output_filename=outputs/${animel}_6v
 
-python src/train_copy_pcd.py       \
---model_path=./data/models/${animel} \
---output_path=./${output_filename} \
---mv_path=./${output_filename}/render_utils/train_outputs \
---epoch=201
+# python src/train_copy_pcd.py       \
+# --model_path=./data/models/${animel} \
+# --output_path=./${output_filename} \
+# --mv_path=./${output_filename}/render_utils/train_outputs \
+# --epoch=201 \
+# --template_path=./data/templates/cube24
 
 # python src/postprocess.py \
 # --model_path=./data/models/${animel} \
@@ -19,4 +20,10 @@ python src/post_perceptual.py \
 --model_path=./data/models/${animel} \
 --output_path=./${output_filename} \
 --mv_path=./${output_filename}/render_utils/train_outputs \
---object_curve_num=20
+--object_curve_num=35 \
+# --template_path=./data/templates/cube24
+
+# python eval/fitting_eval.py \
+# --model_path=./data/models/${animel} \
+# --output_path=./${output_filename} \
+# --th=0.02
