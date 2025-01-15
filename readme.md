@@ -1,55 +1,23 @@
-通過GPU上的迭代，使用柏志的patch loss產生wire art
+## environment 
+### pytorch: <br>
+```
+conda install pytorch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 pytorch-cuda=11.7 -c pytorch -c nvidia
+```
+---
 
-## 運行順序
-- 先運行 render_utils 中的 run.sh
-    - render -> alpha shape -> expand -> train
-- 前面三部都做好的話直接運行 demo_deform.py(train)
+### pytorch3d-v0.7.4 installation <br>
+Refer to [pytorch3d v0.7.4 github-install](https://github.com/facebookresearch/pytorch3d/blob/v0.7.4/INSTALL.md)
 
-## training 權重以及影響
-- 增加神經網絡
-    - linear -> apes -> feature -> MLP
-    - 每一個epoch會對input pcd進行點的順序打亂
+```
+conda install -c fvcore -c iopath -c conda-forge fvcore iopath
+conda install -c bottler nvidiacub
+conda install pytorch3d -c pytorch3d
+```
+[anaconda-pytorch3d-v0.7.4 file](https://anaconda.org/pytorch3d/pytorch3d/files?page=1&version=0.7.4) if needed
 
+---
 
-- chamfer_loss
-    - 1
-- overlap_loss
-    - 0.01 
-- planar_loss
-    - 2 
-    - 試過小於1， 對結果有影響，而且結果會變差
-- symmetry_loss
-    - 0.1
-- curvature_loss
-    - 0.015
-    - 1. 對於curve採樣點的權重分配
-        - `(i-0.5)**8*64`
-    - 2. 不同大小的loss weight影響
-        - 1.0 會讓整個fitting出問題
-- normal loss
-    - 0.008: 腳還是不會分開
-    - 0.08: 前腳會糾纏在一起
-    - 0.1 * math.exp((i-(epoch_num*0.7))/100) 逐漸增大，在epoch num*0.7時權重為1
-        - max(1, math.exp((i-(epoch_num*0.7))/100)) 不超過1 (沒區別)
-- distance weight
-    - 1 
-    - ((d-m)*0.2) + 1
-    - ((m-d)*0.2) + 1
-        - 似乎兩腿之間收斂的比較快
-        - 在ox上沒差，反而不如d-m
-- mv weight
-    - 看不出太大區別
-
-## 動物模型
-- cat：會在前100epoch無法分開前腿和後退
-- dog：50epoch前腿和後退就完全分開了，效果非常好
-- horse: 後腳完全沒有分離，並且扭曲重疊翻轉
-
-# post-process
-- 尋找curves samplepoints在GT上的最近k個點，做為投影
-- 投影後得到 [curve num, curve sample num, k]。
-    - 這個矩陣是投影點在GT上的idx
-- 計算match rate
-    - 即一個curve的采樣點，有多少能夠投影到multi view points上
-- 通過pca計算兩個主方向的長度 -> 決定幾個旋轉矩陣的角度
-- 旋轉 -> 計算IOU -> 刪除不需要的curve -> 繼續
+### requirements:<br>
+```
+pip install -r requirements.txt
+```

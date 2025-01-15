@@ -1,5 +1,7 @@
 /output*
-test.py
+/test_files
 /data/Animal
 /data/exosk-data
+/data/models
 /IoU_eval/outputs
+graph.png

@@ -34,7 +34,6 @@ import os
 import time
 import sys
 from einops import repeat, pack, rearrange
-from pytorch_lightning import LightningModule
 
 class Renderer(nn.Module):
     def __init__(self, device='cuda:0', batch_size=8):

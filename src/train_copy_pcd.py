@@ -18,16 +18,16 @@ from utils.patch_utils import *
 from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
-from model.utils.layers import Embedding_
 
+from model.utils.layers import Embedding_
 from model.backbone.apes_seg_backbone import APESSeg2Backbone
 from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp, simple_mlp_
 from model.head.apes_cls_head import MLP_Head
 from model.utils.layers import UpSample
 
-class Model_warmup(nn.Module):
+class ModelWarmup(nn.Module):
     def __init__(self, template_params, batch_size):
-        super(Model_warmup, self).__init__()
+        super(ModelWarmup, self).__init__()
         self.batch_size = batch_size
         # template_params input shape : [B, N, C]
         self.register_buffer('template_params', template_params[0].reshape(-1)) # [N*C]
@@ -291,8 +291,8 @@ def training(**kwargs):
     # train
     batch_size = kwargs['batch_size']
     control_point_num = 4
-    model_warmup = Model_warmup(template_params, batch_size).cuda()
-    optimizer = torch.optim.Adam(model_warmup.parameters(), 0.02, betas=(0.5, 0.99))
+    ModelWarmup = ModelWarmup(template_params, batch_size).cuda()
+    optimizer = torch.optim.Adam(ModelWarmup.parameters(), 0.02, betas=(0.5, 0.99))
 
     model = Model(template_params).cuda()
     optimizer = torch.optim.Adam(model.parameters(), kwargs['learning_rate'], betas=(0.5, 0.99))

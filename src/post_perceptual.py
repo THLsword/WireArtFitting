@@ -29,6 +29,7 @@ from utils.curve_utils import *
 from utils.mview_utils import multiview_sample, curve_probability
 from utils.postprocess_utils import get_unique_curve, project_curve_to_pcd, delete_single_curve, create_curve_graph, find_deletable_edges, compute_IOU
 from utils.create_mesh import create_mesh
+from utils.graph_utils import minimum_path_coverage
 
 from model.backbone.apes_seg_backbone import APESSeg2Backbone
 from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp, simple_mlp_
