@@ -1,13 +1,8 @@
 import os
 import torch
-import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import argparse
-
-# Util function for loading point clouds|
 import numpy as np
-
-# Data structures and functions for rendering
 from pytorch3d.structures import Pointclouds
 from pytorch3d.vis.plotly_vis import AxisArgs, plot_batch_individually, plot_scene
 from pytorch3d.renderer import (
@@ -22,34 +17,11 @@ from pytorch3d.renderer import (
     NormWeightedCompositor
 )
 from PIL import Image
-
-from alpha_shapes import Alpha_Shaper, plot_alpha_shape
-from alpha_shapes.boundary import Boundary, get_boundaries
-from matplotlib.patches import PathPatch
-from matplotlib.path import Path
 from tqdm import tqdm
 
 
-
-def render_pcd(DATA_DIR,SAVE_DIR,file_path,filename):
-    # Setup
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-        torch.cuda.set_device(device)
-    else:
-        device = torch.device("cpu")
-
-    # Load point cloud
-    npzfile = np.load(file_path)
-    pointcloud = npzfile['points']
-    # 将点云平移到原点
-    centroid = np.mean(pointcloud, axis=0) 
-    point_cloud_centered = pointcloud - centroid
-    # 缩放点云使其适应[-1, 1]范围
-    max_distance = np.max(np.sqrt(np.sum(point_cloud_centered ** 2, axis=1)))
-    point_cloud_normalized = point_cloud_centered / max_distance
-
-    verts = torch.Tensor(point_cloud_normalized).to(device)
+def pcd_renderer(input_pcd, view_angels, device):
+    verts = torch.Tensor(input_pcd).to(device)
     rgb = torch.ones_like(verts).to(device)
 
     point_cloud = Pointclouds(points=[verts], features=[rgb])
@@ -57,7 +29,7 @@ def render_pcd(DATA_DIR,SAVE_DIR,file_path,filename):
     # Initialize a camera.
     list_R=[]
     list_T=[]
-    for x in [45,90,135,225,270,315]:
+    for x in view_angels:
         temp_R, temp_T = look_at_view_transform(1.5, 15, x)
         list_R.append(temp_R)
         list_T.append(temp_T)
@@ -68,6 +40,7 @@ def render_pcd(DATA_DIR,SAVE_DIR,file_path,filename):
         points_per_pixel = 5
     )
 
+    rendered_images = []
     for i in tqdm(range(len(list_R))):
         # camera_list.append(PerspectiveCameras(R=list_R[i], T=list_T[i], device=device))
         # cameras = PerspectiveCameras(R=list_R[i], T=list_T[i], device=device)
@@ -79,13 +52,13 @@ def render_pcd(DATA_DIR,SAVE_DIR,file_path,filename):
             # to the 3 item tuple, representing rgb on a scale of 0 -> 1, in this case blue
             compositor=AlphaCompositor(background_color=(0.0, 0.0, 0.0))
         )
-        images = renderer(point_cloud)
-        image_data = images[0, ..., :3].cpu().numpy()
+        output = renderer(point_cloud)
+        image_data = output[0, ..., :3].cpu().numpy()
         image_data = (image_data * 255).astype(np.uint8)
+        rendered_images.append(image_data)
 
-        image = Image.fromarray(image_data)
-        SAVE_filename=f'{os.path.splitext(filename)[0]}_{i}.png'
-        image.save(os.path.join(SAVE_DIR,SAVE_filename))
+    return rendered_images
+        
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -95,9 +68,31 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    # Set paths
+    # device setup
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        torch.cuda.set_device(device)
+    else:
+        device = torch.device("cpu")
+
+    # create paths
     if not os.path.exists(args.SAVE_DIR):
         os.makedirs(args.SAVE_DIR, exist_ok=True)
 
+    # load pointcloud
     file_path = os.path.join(args.DATA_DIR, args.filename)
-    render_pcd(args.DATA_DIR,args.SAVE_DIR,file_path,args.filename)
+    npzfile = np.load(file_path)
+    pointcloud = npzfile['points']
+
+    # view_angels
+    view_angels = [45,90,135,225,270,315]
+
+    file_path = os.path.join(args.DATA_DIR, args.filename)
+    rendered_images = pcd_renderer(pointcloud, view_angels, device)
+
+    # save image
+    for i, data in enumerate(rendered_images):
+        image = Image.fromarray(data)
+        SAVE_filename=f'{os.path.splitext(args.filename)[0]}_{i}.png'
+        print(SAVE_filename)
+        image.save(os.path.join(args.SAVE_DIR,SAVE_filename))

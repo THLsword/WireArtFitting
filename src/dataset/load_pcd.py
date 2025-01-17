@@ -8,6 +8,12 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 
 def load_npz(file_path):
+    """
+    imput: file path  
+    outputs: points: Tensor[n,3]  
+             normals: Tensor[n,3]  
+             areas: Tensor[1]  
+    """
     npz_path = ''
     if os.path.exists(os.path.join(file_path, "model_normalized_4096.npz")):
         npz_path = os.path.join(file_path, "model_normalized_4096.npz")

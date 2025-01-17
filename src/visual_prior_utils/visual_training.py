@@ -1,17 +1,12 @@
-"""
-Demo deform.
-Deform template mesh based on input silhouettes and camera pose
-"""
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
+from torch import Tensor
+
 import os
-import tqdm
-import math
+from tqdm import tqdm
 import numpy as np
 import argparse
-from einops import rearrange, repeat
+
 # Data structures and functions for rendering
 from pytorch3d.structures import Pointclouds
 from pytorch3d.vis.plotly_vis import AxisArgs, plot_batch_individually, plot_scene
@@ -44,18 +39,17 @@ def save_obj(filename, cps):
             file.write("v {} {} {}\n".format(*point))
 
 class Model(nn.Module):
-    def __init__(self, pcd, device):
+    def __init__(self, pcd, view_angels, device):
         super(Model, self).__init__()
         self.device = device
-        # set template mesh
-        self.pcd = pcd.to(device) # [2048,3]
+        self.pcd = pcd # [n, 3]
         self.register_buffer('init_colors', torch.zeros(4096))
 
         # optimize for displacement map and center
         self.register_parameter('displace', nn.Parameter(torch.zeros_like(self.init_colors)))
 
         # render
-        self.views = [45,90,135,225,270,315] # degree of 360
+        self.views = view_angels # degree of 360
         self.view_num = len(self.views)
         self.R, self.T = look_at_view_transform(1.5, 15, self.views) 
         self.raster_settings = PointsRasterizationSettings(
@@ -63,7 +57,7 @@ class Model(nn.Module):
             radius = 0.01,
             points_per_pixel = 5
         )
-        self.cameras = FoVOrthographicCameras(device=device, R=self.R, T=self.T, znear=0.01)
+        self.cameras = FoVOrthographicCameras(device=self.device, R=self.R, T=self.T, znear=0.01)
         self.rasterizer=PointsRasterizer(cameras=self.cameras, raster_settings=self.raster_settings)
         self.renderer = PointsRenderer(
             rasterizer=self.rasterizer,
@@ -74,10 +68,10 @@ class Model(nn.Module):
 
     def forward(self):
         base = self.init_colors.to(self.device)
-        colors_ = torch.sigmoid(base+self.displace) # [2048]
+        colors_ = torch.sigmoid(base+self.displace) # [n]
 
         points = self.pcd.unsqueeze(0).repeat(self.view_num,1,1)
-        colors = colors_.unsqueeze(1).repeat(1,3) # (2048) -> (2048,3)
+        colors = colors_.unsqueeze(1).repeat(1,3) # (n) -> (n, 3)
         colors = colors.unsqueeze(0).repeat(self.view_num,1,1)
 
         # point_cloud = Pointclouds(points=[self.pcd], features=[colors])
@@ -86,7 +80,7 @@ class Model(nn.Module):
         images = self.renderer(point_cloud) # (self.view_num,256,256,3)
         return images, colors_
 
-def WeightL1(pred, target):
+def weighted_L1_loss(pred, target):
     pred = pred.sum(dim=-1)/3     # (B,4,256,256,3) -> (B,4,256,256)
     target = target.sum(dim=-1)/3 # (B,4,256,256,3) -> (B,4,256,256)
 
@@ -99,47 +93,20 @@ def WeightL1(pred, target):
 
     return L1_loss
 
-def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
-    torch.cuda.empty_cache()
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")
-        torch.cuda.set_device(device)
-    else:
-        device = torch.device("cpu")
+def visual_training(input_pcd, contour_imgs, epoch, view_angels, device) -> tuple[Tensor, Tensor]:
+    # data to tensor
+    pcd_tensor = torch.tensor(input_pcd).to(torch.float32).to(device)
+    contour_imgs_tensor = torch.tensor(contour_imgs / 255.0, dtype=torch.float32).to(device)
 
-    # load pcd
-    npzfile = np.load(pcd_path)
-    pcd = npzfile['points']
-    # 将点云平移到原点
-    centroid = np.mean(pcd, axis=0)
-    point_cloud_centered = pcd - centroid
-    # 缩放点云使其适应[-1, 1]范围
-    max_distance = np.max(np.sqrt(np.sum(point_cloud_centered ** 2, axis=1)))
-    point_cloud_normalized = point_cloud_centered / max_distance
-    pcd_tensor = torch.tensor(point_cloud_normalized).to(torch.float32).to(device)
-
-    # load gt(expened alpha shape images)
-    multi_view_paths = []
-    for filename in os.listdir(gt_path):
-        if filename.endswith('.png'):
-            file_path = os.path.join(gt_path, filename)
-            multi_view_paths.append(file_path)
-    multi_view_paths.sort()
-
-    multi_view_imgs = [Image.open(path) for path in multi_view_paths]
-    np_imgs = [np.array(img) for img in multi_view_imgs]
-    gt_np = [img.astype(np.float32) / 255. for img in np_imgs]
-    images_gt = torch.tensor(gt_np).to(device)
-
-    # init
-    model = Model(pcd_tensor, device).to(device)
+    # model init
+    model = Model(pcd_tensor, view_angels, device).to(device)
     optimizer = torch.optim.Adam(model.parameters(), 0.1, betas=(0.5, 0.99))
-    loss_fn = nn.MSELoss(reduction="mean")
 
-    loop = tqdm.tqdm(list(range(0, epoch)))
+    loop = tqdm(list(range(0, epoch)))
+    images, colors = torch.empty(0), torch.empty(0)
     for i in loop:
         images, colors = model.forward()
-        loss = WeightL1(images, images_gt)
+        loss = weighted_L1_loss(images, contour_imgs_tensor)
 
         loop.set_description('Loss: %.4f' % (loss.item()))
 
@@ -147,33 +114,46 @@ def main(DATA_DIR, pcd_path, gt_path, output_path, epoch):
         loss.backward()
         optimizer.step()
 
-        if (i+1) % 50 == 0:
-            for j, image in enumerate(images):
-                save_img(image.detach().cpu().numpy(), f'{output_path}/output_{i+1}_{j}.png')
-            torch.save(colors, f'{DATA_DIR}/weights.pt')
-            torch.save(colors, f'{output_path}/weights.pt')
-
-        if (i+1) == epoch:
-            mask = (colors > 0.5)
-            masked_pcd = pcd_tensor[mask]
-            save_obj(f'{output_path}/multi_view.obj', masked_pcd)
-
-    torch.cuda.empty_cache()
+    return images, colors
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--DATA_DIR', type=str, default="./data/models/cat")
-    parser.add_argument('--GT_DIR', type=str, default="./render_utils/expand_outputs")
+    parser.add_argument('--FILENAME', type=str, default="model_normalized_4096.npz")
+
+    parser.add_argument('--GT_DIR', type=str, default="./render_utils/alpha_outputs")
     parser.add_argument('--SAVE_DIR', type=str, default="./render_utils/train_outputs")
-    parser.add_argument('--filename', type=str, default="model_normalized_4096.npz")
-    parser.add_argument('--epoch', type=int, default=50)
+    
+    parser.add_argument('--EPOCH', type=int, default=50)
+    parser.add_argument('--VIEW_ANGELS', type=float, default=[45,90,135,225,270,315])
 
     args = parser.parse_args()
 
-    file_path = os.path.join(args.DATA_DIR, args.filename)
-    # Set paths
+    # device setup
+    if torch.cuda.is_available():
+        device = torch.device("cuda:0")
+        torch.cuda.set_device(device)
+    else:
+        device = torch.device("cpu")
+
+    # create folder
     if not os.path.exists(args.SAVE_DIR):
         os.makedirs(args.SAVE_DIR, exist_ok=True)
 
-    main(args.DATA_DIR, file_path, args.GT_DIR, args.SAVE_DIR, args.epoch)
+    # load pointcloud
+    PCD_PATH = os.path.join(args.DATA_DIR, args.FILENAME)
+    npzfile = np.load(PCD_PATH)
+    pointcloud = npzfile['points']
+
+    # load contour images
+    images = []
+    for filename in os.listdir(args.GT_DIR):
+        if filename.endswith(".png"): 
+            image_path = os.path.join(args.GT_DIR, filename)
+            with Image.open(image_path) as img:
+                img = img.convert("RGB")
+                images.append(np.array(img))
+    contour_imgs = np.array(images, dtype=np.uint8)
+
+    training_outputs = visual_training(pointcloud, contour_imgs, args.EPOCH, args.VIEW_ANGELS, device)
