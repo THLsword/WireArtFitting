@@ -41,10 +41,10 @@ class Embedding(nn.Module):
         x = torch.cat(x_list, dim=1)  # (B, C=128, N)
         return x
 
-class Embedding_(nn.Module):
-    def __init__(self):
-        super(Embedding_, self).__init__()
-        self.K = 8
+class PcdEmbedding(nn.Module):
+    def __init__(self, k=8):
+        super(PcdEmbedding, self).__init__()
+        self.K = k
         self.group_type = 'center_diff'
         self.conv1 = nn.Sequential(nn.Conv2d(6, 128, 1, bias=False), nn.BatchNorm2d(128), nn.LeakyReLU(0.2))
         self.conv2 = nn.Sequential(nn.Conv2d(128, 64, 1, bias=False), nn.BatchNorm2d(64), nn.LeakyReLU(0.2))

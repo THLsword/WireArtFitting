@@ -7,8 +7,9 @@ import sys
 sys.path.insert(0, os.path.abspath(
 	os.path.join(os.path.dirname(__file__), '..')
 ))
-from ..utils.layers import Embedding, Embedding_, N2PAttention, GlobalDownSample, LocalDownSample, DownSample_new, GlobalDownSample_more
+from ..utils.layers import Embedding, PcdEmbedding, N2PAttention, GlobalDownSample, LocalDownSample, DownSample_new, GlobalDownSample_more
 
+''' just reference
 class APESClsBackbone(nn.Module):
     def __init__(self, which_ds):
         super(APESClsBackbone, self).__init__()
@@ -51,29 +52,30 @@ class APESClsBackbone(nn.Module):
         self.res_link_list.append(self.conv2(x).max(dim=-1)[0])  # (B, 128, 512) -> (B, 1024, 512) -> (B, 1024)
         x, ps = pack(self.res_link_list, 'B *')  # (B, 3072)
         return x 
+'''
  
-class simple_mlp(nn.Module):
+class PcdBackbone(nn.Module):
     def __init__(self):
-        super(simple_mlp, self).__init__()
+        super(PcdBackbone, self).__init__()
         # self.conv1 = nn.Sequential(nn.Conv1d(3,128,1), nn.LeakyReLU(0.2))
-        self.conv1 = Embedding()
+        self.embedding_layer = PcdEmbedding(32) # (B, 3, N) -> (B, 128, N)
         self.n2p_attention = N2PAttention()
 
     def forward(self, x):
-        # x = self.conv1(x)
+        x = self.embedding_layer(x)
         x = self.n2p_attention(x)
         # x, _ = x.max(dim = 2)
         return x
 
-class simple_mlp_(nn.Module):
+class PrepBackbone(nn.Module):
     def __init__(self):
-        super(simple_mlp_, self).__init__()
+        super(PrepBackbone, self).__init__()
         # self.conv1 = nn.Sequential(nn.Conv1d(3,128,1), nn.LeakyReLU(0.2))
-        self.conv1 = Embedding_()
+        self.embedding_layer = PcdEmbedding(8)
         self.n2p_attention = N2PAttention()
 
     def forward(self, x):
-        # x = self.conv1(x)
+        x = self.embedding_layer(x)
         x = self.n2p_attention(x)
         # x, _ = x.max(dim = 2)
         return x

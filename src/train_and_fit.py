@@ -1,5 +1,5 @@
 import os
-import tqdm
+from tqdm import tqdm
 import math
 import torch
 import torch.nn as nn
@@ -18,18 +18,9 @@ from utils.patch_utils import *
 from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
-from utils.save_data import save_img
-from utils.save_data import save_obj
-
-from model.utils.layers import Embedding_
-from model.backbone.apes_seg_backbone import APESSeg2Backbone
-from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp, simple_mlp_
-from model.head.apes_cls_head import MLP_Head
-from model.utils.layers import UpSample
+from utils.save_data import save_img, save_obj, save_lr_fig, save_loss_fig
 
 from model.model_interface import Model
-from model.model_interface import WarmupModel
-
 
 def lr_lambda(epoch):
     warm_epoch = 20
@@ -38,38 +29,12 @@ def lr_lambda(epoch):
     else:
         return 0.99 ** (epoch - warm_epoch)
 
-def compute_warm_up_loss(vertices, patches, pcd_points, sample_num, tpl_sym_idx):
+
+def compute_loss(cp_coord, patches, curves, pcd_points, pcd_normals, pcd_area, prep_points, sample_num, tpl_sym_idx, prerp_weights_scaled, i: int, epoch_num: int):
     batch_size = patches.shape[0]
     face_num = patches.shape[1]
     st = torch.empty(batch_size, face_num, sample_num**2, 2).uniform_().to(patches) # [b, patch_num, sample_num, 2]
 
-    # preprocessing
-    # patches (B,face_num,cp_num,3)
-    points  = coons_points(st[..., 0], st[..., 1], patches) # [b, patch_num, sample_num, 3]
-    normals = coons_normals(st[..., 0], st[..., 1], patches)
-    mtds    = coons_mtds(st[..., 0], st[..., 1], patches)   # [b, patch_num, sample_num] 
-    pcd_points  = pcd_points.repeat(batch_size,1,1)
-
-    # area-weighted chamfer loss (position + normal)
-    chamfer_loss = warm_up_chamfer_loss(mtds, points, pcd_points)
-
-    # flatness loss
-    planar_loss = planar_patch_loss(st, points, mtds)
-
-    # symmetry loss
-    symmetry_loss = torch.zeros(1).to(patches)
-    symmetry_loss = patch_symmetry_loss(tpl_sym_idx[0], tpl_sym_idx[1], vertices)
-
-    loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss
-
-    return loss.mean()
-
-def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, mv_points, sample_num, tpl_sym_idx, multi_view_weights, i, epoch_num):
-    batch_size = patches.shape[0]
-    face_num = patches.shape[1]
-    st = torch.empty(batch_size, face_num, sample_num**2, 2).uniform_().to(patches) # [b, patch_num, sample_num, 2]
-
-    FA_rate = 0.0
     chamfer_weight_rate = 0.5
 
     # preprocessing
@@ -78,13 +43,13 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, m
     normals = coons_normals(st[..., 0], st[..., 1], patches)
     mtds    = coons_mtds(st[..., 0], st[..., 1], patches)   # [b, patch_num, sample_num] 
     pcd_points  = pcd_points.repeat(batch_size,1,1)
-    mv_points = mv_points.repeat(batch_size,1,1)
+    prep_points = prep_points.repeat(batch_size,1,1)
     pcd_normals = pcd_normals.repeat(batch_size,1,1)
     pcd_area    = pcd_area.repeat(batch_size,1,1)
 
     # area-weighted chamfer loss (position + normal)
     chamfer_loss, normal_loss = area_weighted_chamfer_loss(
-        mtds, points, normals, pcd_points, pcd_normals, chamfer_weight_rate, multi_view_weights
+        mtds, points, normals, pcd_points, pcd_normals, chamfer_weight_rate, prerp_weights_scaled
     )
     
     # normal loss weight
@@ -102,7 +67,7 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, m
     curve_chamfer_loss = curve_chamfer_loss.mean(1)
 
     # multi view curve loss
-    _, _, mv_curve_loss, _ = curve_chamfer(curve_points, mv_points)
+    _, _, mv_curve_loss, _ = curve_chamfer(curve_points, prep_points)
     mv_curve_loss = mv_curve_loss.mean(1)
 
     # flatness loss
@@ -119,7 +84,7 @@ def compute_loss(vertices, patches, curves, pcd_points, pcd_normals, pcd_area, m
 
     # symmetry loss
     symmetry_loss = torch.zeros(1).to(patches)
-    symmetry_loss = patch_symmetry_loss(tpl_sym_idx[0], tpl_sym_idx[1], vertices)
+    symmetry_loss = patch_symmetry_loss(tpl_sym_idx[0], tpl_sym_idx[1], cp_coord)
 
     # curvature loss
     curvature_loss = curve_curvature_loss(curves, linspace)
@@ -155,10 +120,14 @@ def training(**kwargs):
         torch.cuda.set_device(device)
     else:
         device = torch.device("cpu")
+
+    # create path folder
+    output_path = kwargs['output_path']
+    os.makedirs(output_path, exist_ok=True)
+    os.makedirs(f"{output_path}/training_save", exist_ok=True)
     
     # load .npz point cloud
     model_path = kwargs['model_path']
-    output_path = kwargs['output_path']
     pcd_points, pcd_normals, pcd_area = load_npz(model_path)
     pcd_points, pcd_normals, pcd_area = pcd_points.to(device), pcd_normals.to(device), pcd_area.to(device)
     pcd_maen = abs(pcd_points).mean(0) # [3]
@@ -176,7 +145,7 @@ def training(**kwargs):
         prerp_weights_scaled = None
 
     # multi-view points sample from pcd
-    mv_points = multiview_sample(pcd_points, prep_weights) # (M, 3)
+    prep_points = multiview_sample(pcd_points, prep_weights) # (M, 3)
 
     # load template
     template_path = kwargs['template_path']
@@ -190,69 +159,73 @@ def training(**kwargs):
     tpl_params = (tpl_params.view(-1,3) / template_mean * pcd_maen)
 
     # train
-    batch_size = kwargs['batch_size']
-    control_point_num = 4
-    tpl_params = tpl_params.view(-1,3).repeat(batch_size, 1, 1)
-    warmup_model = WarmupModel(tpl_params, batch_size).cuda()
-    optimizer = torch.optim.Adam(warmup_model.parameters(), 0.02, betas=(0.5, 0.99))
-
-    model = Model(tpl_params).cuda()
+    BATCH_SIZE = kwargs['batch_size']
+    CTRL_P_NUM = 4 # number of control points on one curve
+    model = Model(tpl_params.repeat(BATCH_SIZE, 1, 1)).cuda()
     optimizer = torch.optim.Adam(model.parameters(), kwargs['learning_rate'], betas=(0.5, 0.99))
-    loop = tqdm.tqdm(list(range(0, kwargs['epoch'])))
+    loop = tqdm(range(kwargs['epoch']))
     scheduler = LambdaLR(optimizer, lr_lambda)
+
+    loss_list = []
+    lr_list = []
     for i in loop:
+        model.train()
         indices = torch.randperm(pcd_points.size(0))  # 生成一个从 0 到 1023 的随机排列索引
         shuffled_pcd_points = pcd_points[indices]
 
-        vertices = model(shuffled_pcd_points.repeat(batch_size, 1, 1), mv_points.repeat(batch_size, 1, 1)) # MLP:(B, N), review (B, -1, 3)
-        patches = vertices[:,tpl_f_idx] # (B, face_num, cp_num, 3)
-        curves = vertices[:,tpl_c_idx] # (B, curve_num, cp_num, 3)
+        cp_coord = model(shuffled_pcd_points.repeat(BATCH_SIZE, 1, 1), prep_points.repeat(BATCH_SIZE, 1, 1)) # MLP:(B, N), review to (B, -1, 3)
+        patches = cp_coord[:,tpl_f_idx] # (B, face_num, cp_num, 3)
+        curves = cp_coord[:,tpl_c_idx] # (B, curve_num, cp_num, 3)
         prerp_weights_scaled = 1 + (prerp_weights_scaled * i / kwargs['epoch']) # 0.75~1.25
-        loss_params = {
-            'vertices':vertices,
-            'patches':patches,
-            'curves':curves,
-            'pcd_points':pcd_points,
-            'pcd_normals':pcd_normals,
-            'pcd_area':pcd_area,
-            'mv_points':mv_points,
-            'sample_num':sample_num,
-            'tpl_sym_idx':tpl_sym_idx,
-            'multi_view_weights':prerp_weights_scaled,
-            'i':i, 
-            'epoch_num':kwargs['epoch']
-        }
-        loss = compute_loss(**loss_params)
+        loss = compute_loss(
+            cp_coord=cp_coord, # [B, n, 3]
+            patches=patches,
+            curves=curves,
+            pcd_points=pcd_points,
+            pcd_normals=pcd_normals,
+            pcd_area=pcd_area,
+            prep_points=prep_points,
+            sample_num=sample_num,
+            tpl_sym_idx=tpl_sym_idx,
+            prerp_weights_scaled=prerp_weights_scaled,
+            i=i,
+            epoch_num=kwargs['epoch']
+        )
         loop.set_description('Loss: %.4f' % (loss.item()))
-
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         scheduler.step()
         # print(f"Epoch {i + 1}, Learning Rate: {optimizer.param_groups[0]['lr']}")
 
+        # record loss and learning rate
+        with torch.no_grad():
+            loss_list.append(loss.cpu())
+            current_lr = optimizer.param_groups[0]['lr']
+            lr_list.append(current_lr)
+
+        # save data
         if i % 50 == 0 or i == kwargs['epoch'] - 1:
             with torch.no_grad():
-                output_path = kwargs['output_path']
-                os.makedirs(output_path, exist_ok=True)
-                os.makedirs(f"{output_path}/training_save", exist_ok=True)
-                write_curve_points(f"{output_path}/training_save/{i}_curve.obj", curves[0], control_point_num)
-                write_obj(f"{output_path}/training_save/{i}_mesh.obj", patches[0], control_point_num)
+                write_curve_points(f"{output_path}/training_save/{i}_curve.obj", curves[0], CTRL_P_NUM)
+                write_obj(f"{output_path}/training_save/{i}_mesh.obj", patches[0], CTRL_P_NUM)
 
+                '''
                 # save every patch
                 if i == kwargs['epoch'] - 1:
                     for j, patch in enumerate(patches[0]):
-                        write_obj(f"{output_path}/training_save/patch{j}.obj", patch.unsqueeze(0), control_point_num)
+                        write_obj(f"{output_path}/training_save/patch{j}.obj", patch.unsqueeze(0), CTRL_P_NUM)
+                '''
 
                 # curve probability
                 # curves (b, curve_num, cp_num, 3)
                 curve_sample_num = 16
-                curves, curves_mask = curve_probability(mv_points, curves[0], curve_sample_num)
+                curves, curves_mask = curve_probability(prep_points, curves[0], curve_sample_num)
                 torch.save(curves_mask, f'{output_path}/curves_mask.pt')
-                # write_curve_points(f"{output_path}/training_save/{i}_curve_d.obj", curves, control_point_num)
+                # write_curve_points(f"{output_path}/training_save/{i}_curve_d.obj", curves, CTRL_P_NUM)
 
                 # save control points
-                save_obj(f"{output_path}/control_points.obj", vertices[0])
+                save_obj(f"{output_path}/control_points.obj", cp_coord[0])
 
                 # save nn model
                 torch.save(model, f"{output_path}/model_weights.pth")
@@ -260,6 +233,12 @@ def training(**kwargs):
                 # save pcd
                 save_obj(f"{output_path}/training_save/pcd.obj", pcd_points)
                 
+    # save loss and lr logs as images
+    log_save_dir = os.path.join(output_path, "logs")
+    if not os.path.exists(log_save_dir):
+        os.makedirs(log_save_dir, exist_ok=True)
+    save_loss_fig(loss_list, log_save_dir) # save loss image
+    save_lr_fig(lr_list, log_save_dir) # save learning rate image
 
 if __name__ == '__main__':
     # ` python src/train.py `
@@ -267,7 +246,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, default="data/models/cat")
     parser.add_argument('--template_path', type=str, default="data/templates/sphere24")
     parser.add_argument('--output_path', type=str, default="outputs/cat")
-    parser.add_argument('--prep_output_path', type=str, default="preprocess_outputs/train_outputs")
+    parser.add_argument('--prep_output_path', type=str, default="outputs/cat/prep_outputs/train_outputs")
 
     parser.add_argument('--epoch', type=int, default="201")
     parser.add_argument('--batch_size', type=int, default="1") # 不要改，就是1
@@ -278,4 +257,5 @@ if __name__ == '__main__':
     parser.add_argument('--match_rate', type=float, default=0.2) 
 
     args = parser.parse_args()
+
     training(**vars(args))

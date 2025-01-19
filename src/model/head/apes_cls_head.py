@@ -53,9 +53,9 @@ class APESSegHead(nn.Module):
         return 1 / (1 + torch.pow(20, -x))
 
 
-class MLP_Head(nn.Module):
+class MLPHead(nn.Module):
     def __init__(self):
-        super(MLP_Head, self).__init__()
+        super(MLPHead, self).__init__()
         self.linear1 = nn.Sequential(nn.Linear(128, 256), nn.LeakyReLU(0.2))
         self.linear2 = nn.Linear(256, 366)
         nn.init.zeros_(self.linear2.bias)

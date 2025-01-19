@@ -26,6 +26,14 @@ def main(args):
     VIEW_ANGELS = args.VIEW_ANGELS
     PCD_PATH = os.path.join(DATA_DIR, FILENAME)
 
+    # create folder
+    if not os.path.exists(args.RENDER_SAVE_DIR):
+        os.makedirs(args.RENDER_SAVE_DIR, exist_ok=True)
+    if not os.path.exists(args.ALPHA_SAVE_DIR):
+        os.makedirs(args.ALPHA_SAVE_DIR, exist_ok=True)
+    if not os.path.exists(args.TRAIN_SAVE_DIR):
+        os.makedirs(args.TRAIN_SAVE_DIR, exist_ok=True)
+
     # load normalized pointcloud
     npzfile = np.load(PCD_PATH)
     pointcloud = npzfile['points']
@@ -95,9 +103,9 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--DATA_DIR', type=str, default="./data/models/cat")
-    parser.add_argument('--RENDER_SAVE_DIR', type=str, default="./preprocess_outputs/render_outputs")
-    parser.add_argument('--ALPHA_SAVE_DIR', type=str, default="./preprocess_outputs/alpha_outputs")
-    parser.add_argument('--TRAIN_SAVE_DIR', type=str, default="./preprocess_outputs/train_outputs")
+    parser.add_argument('--RENDER_SAVE_DIR', type=str, default="./prep_outputs/render_outputs")
+    parser.add_argument('--ALPHA_SAVE_DIR', type=str, default="./prep_outputs/alpha_outputs")
+    parser.add_argument('--TRAIN_SAVE_DIR', type=str, default="./prep_outputs/train_outputs")
     parser.add_argument('--FILENAME', type=str, default="model_normalized_4096.npz")
 
     parser.add_argument('--EPOCH', type=int, default=50)
@@ -106,13 +114,5 @@ if __name__ == '__main__':
     parser.add_argument('--EXPAND_SIZE', type=int, default=1)
 
     args = parser.parse_args()
-
-    # create folder
-    if not os.path.exists(args.RENDER_SAVE_DIR):
-        os.makedirs(args.RENDER_SAVE_DIR, exist_ok=True)
-    if not os.path.exists(args.ALPHA_SAVE_DIR):
-        os.makedirs(args.ALPHA_SAVE_DIR, exist_ok=True)
-    if not os.path.exists(args.TRAIN_SAVE_DIR):
-        os.makedirs(args.TRAIN_SAVE_DIR, exist_ok=True)
 
     main(args)
