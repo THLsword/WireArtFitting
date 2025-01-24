@@ -9,8 +9,21 @@ sys.path.insert(0, os.path.abspath(
 	os.path.join(os.path.dirname(__file__), '..')
 ))
 from ..utils import ops, kmeans
-from torch import nn
-from einops import rearrange, repeat
+
+class MLPHead(nn.Module):
+    def __init__(self, output_size):
+        super(MLPHead, self).__init__()
+        self.output_size = output_size
+        self.linear1 = nn.Sequential(nn.Linear(128, 256), nn.LeakyReLU(0.2))
+        self.linear2 = nn.Linear(256, self.output_size)
+        nn.init.zeros_(self.linear2.bias)
+        nn.init.zeros_(self.linear2.weight)
+        
+    def forward(self, x):
+        x, _ = x.max(dim = 2)
+        x = self.linear1(x)
+        x = self.linear2(x)
+        return x
 
 class APESClsHead(nn.Module):
     def __init__(self):
@@ -52,17 +65,3 @@ class APESSegHead(nn.Module):
     def modified_sigmoid(self, x):
         return 1 / (1 + torch.pow(20, -x))
 
-
-class MLPHead(nn.Module):
-    def __init__(self):
-        super(MLPHead, self).__init__()
-        self.linear1 = nn.Sequential(nn.Linear(128, 256), nn.LeakyReLU(0.2))
-        self.linear2 = nn.Linear(256, 366)
-        nn.init.zeros_(self.linear2.bias)
-        nn.init.zeros_(self.linear2.weight)
-        
-    def forward(self, x):
-        x, _ = x.max(dim = 2)
-        x = self.linear1(x)
-        x = self.linear2(x)
-        return x

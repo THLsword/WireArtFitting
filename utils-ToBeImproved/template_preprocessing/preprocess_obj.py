@@ -120,9 +120,9 @@ if __name__ == '__main__':
 
 
     parser = argparse.ArgumentParser(description = 'Preprocess template .obj data.')
-    parser.add_argument('--data-path', type = str, default = 'data/templates/cube24/cube_24.obj',
+    parser.add_argument('--data-path', type = str, default = 'data/templates/donut/template.obj',
 					    help = 'Path of template .obj data.')
-    parser.add_argument('--output-dir', type = str, default = 'data/templates/cube24',
+    parser.add_argument('--output-dir', type = str, default = 'data/templates/donut',
 					    help = 'Directory path of output datas.')          
     args = parser.parse_args()
     

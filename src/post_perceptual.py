@@ -30,54 +30,9 @@ from utils.mview_utils import multiview_sample, curve_probability
 from utils.postprocess_utils import get_unique_curve, project_curve_to_pcd, delete_single_curve, create_curve_graph, find_deletable_edges, compute_IOU
 from utils.create_mesh import create_mesh
 from utils.graph_utils import minimum_path_coverage
+from utils.save_data import save_img, save_obj, save_curves
 
-from model.backbone.apes_seg_backbone import APESSeg2Backbone
-from model.backbone.apes_cls_backbone import APESClsBackbone, simple_mlp, simple_mlp_
-from model.head.apes_cls_head import MLP_Head
-from model.utils.layers import UpSample, Embedding_
-
-
-class Model(nn.Module):
-    def __init__(self, template_params):
-        super(Model, self).__init__()
-        self.register_buffer('template_params', template_params) # (B, 122, 3)
-        self.cp_num = self.template_params.shape[1] * self.template_params.shape[2]
-
-        self.embedding = Embedding_()
-
-        self.simple_MLP  = simple_mlp()
-        self.simple_MLP2 = simple_mlp_() 
-        self.upsample = UpSample()
-
-        self.head = MLP_Head()
-
-    def forward(self, pcd, mv_points):
-        pcd = torch.transpose(pcd, 1, 2) # (B, N, 3) -> (B, 3, N)
-        mv_points = torch.transpose(mv_points, 1, 2) # (B, M, 3) -> (B, 3, M)
-
-        pcd_feature = self.embedding(pcd)
-        pcd_feature = self.simple_MLP(pcd_feature) # (B, C, N)
-        output = self.head(pcd_feature) # (B, C, N) -> (B, 366)
-
-        # ---- 註釋掉就沒有cross attention
-        ds_feature = self.embedding(mv_points)
-        ds_feature = self.simple_MLP2(ds_feature) # (B, C, N)
-        temp = self.upsample(pcd_feature, ds_feature) # (B, C, N)
-        output = self.head(temp)
-        # ---- 註釋掉就沒有cross attention
-        
-        output = rearrange(output, 'B (M N) -> B M N', N = 3)
-        output = self.template_params + output
-
-        return output
-
-def save_obj(filename, points):
-    # points (p_num, 3)
-    with open(filename, 'w') as file:
-        # 遍历每个点，将其写入文件
-        for point in points:
-            # 格式化为OBJ文件中的顶点数据行
-            file.write("v {} {} {}\n".format(*point))
+from model.model_interface import Model
 
 def create_bspline(mean_curve_points):
     print("mean_curve_points:", mean_curve_points.shape)
@@ -107,24 +62,19 @@ def create_bspline(mean_curve_points):
     return curves
 
 def render(data):
-    pcd = data['bspline_remian']
-    rotate_matrix = data['rotate_matrix']
+    """
+    render curves and compute alphashape  
+    inputs: dict ['bspline_remian', 'image_size', 'i: int', 'alpha_value', 'save_img: bool']  
+    outputs: alphashape area and length
+    """
+    rotated_pcd = data['bspline_remian']
     image_size = data['image_size']
     num = data['i'] # for saving png
     alpha_value = data['alpha_value']
     save_img =  data['save_img']
 
-    # 切分np_array, 因為9000*3做矩陣乘法內存好像不夠用(很奇怪，不是很合理，但是不知道為什麼會這樣)
-    split_matrices = np.array_split(pcd, 4, axis=0) # list
-    rotated_pcds = []
-    for i in split_matrices:
-        rotated_pcds.append(np.dot(rotate_matrix, i.T).T)
-    rotated_pcd = np.vstack(rotated_pcds)
-    del rotated_pcds
-
     # projection and image
     projection = rotated_pcd[:, 1:3]
-    del rotated_pcd
 
     img = np.zeros((image_size, image_size))
     for point in projection:
@@ -225,21 +175,19 @@ def training(**kwargs):
     else:
         device = torch.device("cpu")
         
-    ############## load data ######################
-    ############## load data ######################
-    # load .npz point cloud
+    # load data
+        # load .npz point cloud
     model_path = kwargs['model_path']
     output_path = kwargs['output_path']
     pcd_points, pcd_normals, pcd_area = load_npz(model_path)
     # pcd_points, pcd_normals, pcd_area = pcd_points.to(device), pcd_normals.to(device), pcd_area.to(device)
     pcd_maen = abs(pcd_points).mean(0) # [3]
-    average_distance = torch.norm(pcd_points, dim=1).mean()
 
-    # load multi_view weights .pt
-    mv_path = kwargs['mv_path']
-    weight_path = os.path.join(mv_path, 'weights.pt')
+    # load preprocessing' weights .pt
+    prep_output_path = kwargs['prep_output_path']
+    weight_path = os.path.join(prep_output_path, 'weights.pt')
     if os.path.exists(weight_path):
-        mview_weights_ = torch.load(f'{model_path}/weights.pt')
+        mview_weights_ = torch.load(weight_path)
         # 0~1 -> -0.25~0.25
         mview_weights = ((mview_weights_ - 0.5)/3).detach()
         mview_weights.requires_grad_(False)
@@ -285,30 +233,14 @@ def training(**kwargs):
     ################### post-porcessing #################
     ################### post-porcessing #################
     # project_curve_to_pcd
-    ####
-    # sampled_pcd:     (n, 3) only used to save as obj
-    # review_idx :     (curve_num, 140, k) index of pcd 
-    # curve_idx_list : (curve_num, n) each curve's unique idx of pcd
-    # curve_cood_list: (curve_num, n, 3)
-    #### 
+    '''  (n, 3) only used to save as obj
+    review_idx :     (curve_num, 140, k) index of pcd 
+    curve_idx_list : (curve_num, n) each curve's unique idx of pcd
+    curve_cood_list: (curve_num, n, 3)
+    '''
     sampled_pcd, review_idx, curve_idx_list, curve_cood_list = project_curve_to_pcd(curves, pcd_points.repeat(batch_size,1,1), batch_size, sample_num, kwargs['k'])
     print("project to point clod")
     save_obj(f"{output_path}/sampled_pcd.obj", sampled_pcd)
-
-    # # 距離原點超過平均距離的curves
-    # further_curves = []
-    # distance_map = torch.zeros(len(curve_cood_list), dtype=torch.bool)
-    # for i, curve in enumerate(curve_cood_list):
-    #     dis_temp = torch.norm(curve, dim=1)
-    #     condition = dis_temp > average_distance
-    #     count = torch.sum(condition)
-    #     result = count > (dis_temp.size(0) / 3)
-    #     distance_map[i] = result
-    #     if result:
-    #         further_curves.append(curve)
-    # print("further_curves num: ", len(further_curves))
-    # further_curves_tensor = torch.cat(further_curves)
-    # save_obj(f"{output_path}/further_curves.obj", further_curves_tensor)
 
     # get pcd's PCA, Bsplines, and determine different views
     pcd_np = np.array(pcd_points)
@@ -345,8 +277,8 @@ def training(**kwargs):
     # object_curve_num = int(total_curve_unm/1.7)
     object_curve_num = kwargs['object_curve_num']
 
-    pcd_feature = model.simple_MLP(model.embedding(pcd_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device))) #[1, 3, 4096] -> [1, 128, 4096]
-    mv_feature = model.simple_MLP2(model.embedding(mv_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+    pcd_feature = model.pcd_backbone(model.embedding_layer(pcd_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device))) #[1, 3, 4096] -> [1, 128, 4096]
+    mv_feature = model.prep_backbone(model.embedding_layer(mv_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
 
     if cross_attention:  
         pcd_feature = model.upsample(pcd_feature, mv_feature)
@@ -354,28 +286,32 @@ def training(**kwargs):
     #     pcd_feature = model.upsample(pcd_feature, mv_feature)
     #     pcd_feature, _ = pcd_feature.max(dim = 2)
     
-    
     # render & alphashape before remove curves
     image_size = 128
     alpha_value = kwargs['alpha_value']
-    # bspline_remian = transformed_bspline.reshape((-1,3))
     bspline_remian = all_bspline.reshape((-1,3))
+        # rotate bspline
+    rotated_bsplines = []
+    for mat in rotate_matrix:
+        transformed = bspline_remian @ mat.T
+        rotated_bsplines.append(transformed)
+    rotated_bsplines = np.stack(rotated_bsplines, axis=0)
+
     data_list = []
-    for i, value in enumerate(rotate_matrix):
-        data_list.append({'bspline_remian':bspline_remian, 'rotate_matrix':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':False})
+    for i, value in enumerate(rotated_bsplines):
+        data_list.append({'bspline_remian':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':False})
     with ProcessPoolExecutor(max_workers=len(rotate_matrix)) as executor:
         as_results = list(executor.map(render, data_list)) # list [(area,length),...,(area,length)]
-    area_bd   = [] # area before deleting
+    area_before_delet = [] # area before deleting
     length_bd = [] # length before deleting
     for as_result in as_results:
-        area_bd.append(as_result[0])
+        area_before_delet.append(as_result[0])
         length_bd.append(as_result[1])
-    print(area_bd)
 
     ## start removing curves
     mv_thresh = kwargs['mv_thresh']
     curves_ramian = curve_cood_list.copy()
-    area_global = np.array(area_bd) # global is the value before removing
+    area_global = np.array(area_before_delet) # global is the value before removing
     while True:
         delete_idx = []
         L2_losses = []
@@ -425,8 +361,8 @@ def training(**kwargs):
             masked_mvpoints = masked_mvpoints[indices]
 
             # model inference
-            samplepcd_feature = model.simple_MLP(model.embedding(temp_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
-            samplepcd_mv_feature = model.simple_MLP2(model.embedding(masked_mvpoints.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+            samplepcd_feature = model.pcd_backbone(model.embedding_layer(temp_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+            samplepcd_mv_feature = model.prep_backbone(model.embedding_layer(masked_mvpoints.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
             if cross_attention: 
                 samplepcd_feature = model.upsample(samplepcd_feature, samplepcd_mv_feature)
             # else:
@@ -523,8 +459,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_path', type=str, default="data/models/cat")
     parser.add_argument('--template_path', type=str, default="data/templates/sphere24")
-    parser.add_argument('--output_path', type=str, default="outputs/cat_6v")
-    parser.add_argument('--mv_path', type=str, default="render_utils/train_outputs")
+    parser.add_argument('--output_path', type=str, default="outputs/cat")
+    parser.add_argument('--prep_output_path', type=str, default="outputs/cat/prep_outputs/train_outputs")
 
     parser.add_argument('--epoch', type=int, default="201")
     parser.add_argument('--batch_size', type=int, default="1") # 不要改，就是1

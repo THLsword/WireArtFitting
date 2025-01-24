@@ -136,7 +136,7 @@ def training(**kwargs):
     prep_output_path = kwargs['prep_output_path']
     weight_path = os.path.join(prep_output_path, 'weights.pt')
     if os.path.exists(weight_path):
-        prep_weights = torch.load(f'{model_path}/weights.pt')
+        prep_weights = torch.load(weight_path)
         # 0~1 -> -0.25~0.25
         prerp_weights_scaled = ((prep_weights - 0.5)/2).detach()
         prerp_weights_scaled.requires_grad_(False)
@@ -187,7 +187,7 @@ def training(**kwargs):
             prep_points=prep_points,
             sample_num=sample_num,
             tpl_sym_idx=tpl_sym_idx,
-            prerp_weights_scaled=prerp_weights_scaled,
+            prerp_weights_scaled=prerp_weights_scaled.to(device),
             i=i,
             epoch_num=kwargs['epoch']
         )

@@ -1,7 +1,7 @@
 from mimetypes import init
 import os
 
-dir = "data/templates/cube24"
+dir = "data/templates/donut"
 vertices_path = os.path.join(dir, "vertices.txt")
 
 processed_vertices = []

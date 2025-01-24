@@ -50,3 +50,34 @@ def save_lr_fig(lr_list, save_dir):
     plt.legend()
     plt.savefig(os.path.join(save_dir, 'learning_rate.png'))
     plt.close()
+
+def save_curves(save_dir, data):
+    """
+    input: (save_dir, data)
+    data: [curve_num, sample+num, 3]
+    """
+    if isinstance(data, torch.Tensor):
+        data = np.array(data.to('cpu'))
+        
+    num_interp_points = 8 
+    interpolated_curves = []
+    for i in data:
+        # 计算插值后的点数
+        total_points = (i.shape[0] - 1) * (num_interp_points) + 1
+
+        # 创建新的插值点数组
+        interpolated_data = np.zeros((total_points, 3))
+
+        # 进行线性插值
+        idx = 0
+        for j in range(len(i) - 1):
+            for t in np.linspace(0, 1, num_interp_points, endpoint=False):
+                interpolated_data[idx] = (1 - t) * i[j] + t * i[j + 1]
+                idx += 1
+        # 添加最后一个点
+        interpolated_data[idx] = i[-1]
+        interpolated_curves.append(interpolated_data)
+    interpolated_curves = np.array(interpolated_curves)
+    obj_points = interpolated_curves.reshape((-1, 3))
+
+    save_obj(save_dir, obj_points)

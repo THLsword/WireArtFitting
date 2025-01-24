@@ -11,7 +11,6 @@ from einops import rearrange, repeat
 from PIL import Image
 from scipy.interpolate import BSpline
 import networkx as nx
-import tqdm
 from sklearn.decomposition import PCA
 
 from dataset.load_pcd import load_npz, load_obj
@@ -21,47 +20,7 @@ from utils.losses import *
 from utils.curve_utils import * 
 from utils.mview_utils import multiview_sample, curve_probability
 from utils.postprocess_utils import get_unique_curve, project_curve_to_pcd, delete_single_curve, create_curve_graph, find_deletable_edges, compute_IOU
-
-
-def save_img(img,file_name):
-    # img (256,256,3) np array
-    img = img*255
-    img = (img).astype(np.uint8)
-    image = Image.fromarray(img)
-    image.save(file_name)
-
-def save_obj(filename, points):
-    # points (p_num, 3)
-    with open(filename, 'w') as file:
-        # 遍历每个点，将其写入文件
-        for point in points:
-            # 格式化为OBJ文件中的顶点数据行
-            file.write("v {} {} {}\n".format(*point))
-
-def save_curves(file_name, data):
-    data = np.array(data.to('cpu'))
-    num_interp_points = 8 
-    interpolated_curves = []
-    for i in data:
-        # 计算插值后的点数
-        total_points = (i.shape[0] - 1) * (num_interp_points) + 1
-
-        # 创建新的插值点数组
-        interpolated_data = np.zeros((total_points, 3))
-
-        # 进行线性插值
-        idx = 0
-        for j in range(len(i) - 1):
-            for t in np.linspace(0, 1, num_interp_points, endpoint=False):
-                interpolated_data[idx] = (1 - t) * i[j] + t * i[j + 1]
-                idx += 1
-        # 添加最后一个点
-        interpolated_data[idx] = i[-1]
-        interpolated_curves.append(interpolated_data)
-    interpolated_curves = np.array(interpolated_curves)
-    obj_points = interpolated_curves.reshape((-1, 3))
-
-    save_obj(file_name, obj_points)
+from utils.save_data import save_img, save_obj, save_curves
 
 def create_bspline(mean_curve_points):
     print("mean_curve_points:", mean_curve_points.shape)
@@ -131,16 +90,16 @@ def post_processing(**kwargs):
         curves = curves[curves_mask]
 
     # project_curve_to_pcd
-    ####
-    # sampled_pcd:     (n, 3) only used to save as obj
-    # review_idx :     (96, 140, k) index of pcd 
-    # curve_idx_list : (96, n) each curve's unique idx of pcd
-    # curve_cood_list: (96, n, 3)
-    #### 
+    ''' 
+    sampled_pcd:     (n, 3) only used to save as obj
+    review_idx :     (96, 140, k) index of pcd 
+    curve_idx_list : (96, n) each curve's unique idx of pcd
+    curve_cood_list: (96, n, 3)
+    '''
     sampled_pcd, review_idx, curve_idx_list, curve_cood_list = project_curve_to_pcd(curves, pcd_points, batch_size, sample_num, kwargs['k'])
     print("project to point clod")
 
-    # new match method. 
+    # new matching method. 
     # [96, 140, k] <-match-> all mv points. 
     # [96, 140, k] -> [96, 140T/F]
     curves_points_idx = review_idx # (96, 140, k)
@@ -177,7 +136,7 @@ def post_processing(**kwargs):
     transformed_bspline = pca.transform(np.array(all_bspline).reshape((-1,3)))
     transformed_bspline = transformed_bspline.reshape((all_bspline.shape))
     pca_x, pca_y, pca_z = np.max(transformed_data, axis=0) + np.abs(np.min(transformed_data, axis=0))
-    # rotate matrix (will project to yz plane)
+        # rotate matrix (will project to yz plane)
     rotate_y_angels = [0, np.arctan2(pca_z*1.5, pca_x), np.pi/2, np.pi-np.arctan2(pca_z*1.5, pca_x)]
     rotate_matrix = []
     for i in rotate_y_angels:
@@ -193,7 +152,7 @@ def post_processing(**kwargs):
             [0, 0, 1]
         ])
     rotate_matrix = np.stack(rotate_matrix)
-    # compute IOU
+        # compute IOU
     bool_delete = True
     while bool_delete:
         G , graph_list, min_IOU = compute_IOU(rotate_matrix, G, graph_list, transformed_bspline)
