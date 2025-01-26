@@ -56,6 +56,8 @@ def area_weighted_chamfer_loss(
     mtds = mtds.view(b, -1)
     chamferloss_a = torch.sum(mtds*chamferloss_a*distance_weight, dim=-1) / mtds.sum(-1) # [b]
     chamferloss_b = (chamferloss_b*distance_weight_gt).mean(1) # [b]
+    # chamferloss_a = torch.sum(mtds*chamferloss_a, dim=-1) / mtds.sum(-1) # [b]
+    # chamferloss_b = (chamferloss_b).mean(1) # [b]
     chamfer_loss = ((chamferloss_a+chamferloss_b).mean() / 2).view(1)
     
     normalsloss_a = torch.sum(mtds*normalsloss_a, dim=-1) / mtds.sum(-1)

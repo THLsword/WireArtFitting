@@ -23,11 +23,14 @@ from utils.save_data import save_img, save_obj, save_lr_fig, save_loss_fig
 from model.model_interface import Model
 
 def lr_lambda(epoch):
-    warm_epoch = 20
+    warm_epoch = 50
+    k=5
     if epoch < warm_epoch:
-        return (epoch + 1) / warm_epoch
+        # return math.exp((epoch - warm_epoch) / k)
+        return 0.1
     else:
-        return 0.99 ** (epoch - warm_epoch)
+        # return 0.99 ** (epoch - warm_epoch)
+        return 1.0
 
 
 def compute_loss(cp_coord, patches, curves, pcd_points, pcd_normals, pcd_area, prep_points, sample_num, tpl_sym_idx, prerp_weights_scaled, i: int, epoch_num: int):
@@ -79,8 +82,8 @@ def compute_loss(cp_coord, patches, curves, pcd_points, pcd_normals, pcd_area, p
     # Orthogonality loss
     perpendicular_loss = curve_perpendicular_loss(patches)
 
-    # # flatness loss
-    # FA_loss = flatness_area_loss(st, points, mtds)
+    # flatness loss
+    FA_loss = flatness_area_loss(st, points, mtds)
 
     # symmetry loss
     symmetry_loss = torch.zeros(1).to(patches)
@@ -93,23 +96,23 @@ def compute_loss(cp_coord, patches, curves, pcd_points, pcd_normals, pcd_area, p
     thres = 0.9
     beam_gap_loss = compute_beam_gap_loss(points, normals, pcd_points, thres)
     
-    # # loss = chamfer_loss + 0.01*overlap_loss + 2*planar_loss + 0.1*symmetry_loss
-    # stable_loss = chamfer_loss + 0.01*overlap_loss + 2.5*planar_loss + 0.1*symmetry_loss# + 0.012 * curvature_loss
-    # if i <= 50:
-    #     loss = stable_loss + 0.012 * curvature_loss
-    #             # + 0.1 * math.exp(-i/100) * normal_loss
-    #             #+ 0.05 * mv_curve_loss 
-    # elif i > 50 and i <= 100:
-    #     loss = stable_loss + 0.012 * curvature_loss + 0.1*normal_loss * math.exp((i-150)/100)
-    # else :
-    #     loss = stable_loss* math.exp((100-i)/100) +  0.1*normal_loss * math.exp((i-150)/100) + 0.01*curvature_loss * math.exp((100-i)/100)
-    #             #+ math.exp((i-450)/100) * curve_chamfer_loss
-    #             #+ 0.05 * mv_curve_loss \
+    # loss = chamfer_loss + 0.01*overlap_loss + 2*planar_loss + 0.1*symmetry_loss
+    stable_loss = chamfer_loss + 2.5*planar_loss + 0.1*symmetry_loss# + 0.012 * curvature_loss
+    if i <= 50:
+        loss = stable_loss + 0.2 * beam_gap_loss# + 0.012 * curvature_loss
+                # + 0.1 * math.exp(-i/100) * normal_loss
+                #+ 0.05 * mv_curve_loss 
+    elif i > 50 and i <= 100:
+        loss = stable_loss + 0.012 * curvature_loss + 0.1*normal_loss * math.exp((i-150)/100) + 0.2 * beam_gap_loss
+    else :
+        loss = stable_loss* math.exp((100-i)/100) +  0.1*normal_loss * math.exp((i-150)/100) + 0.2 * beam_gap_loss + 0.01*curvature_loss * math.exp((100-i)/100)
+                #+ math.exp((i-450)/100) * curve_chamfer_loss
+                #+ 0.05 * mv_curve_loss \
 
-    # test loss
-    # stable_loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss + normal_loss + 0.2 * beam_gap_loss
-    stable_loss =  chamfer_loss + 2.3 *planar_loss + 0.1*symmetry_loss + 0.7*normal_loss + 0.20 * beam_gap_loss# + 0.002 * curvature_loss# + 0.005*overlap_loss
-    loss = stable_loss
+    # # test loss
+    # # stable_loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss + normal_loss + 0.2 * beam_gap_loss
+    # stable_loss =  chamfer_loss + 2.0 *planar_loss + 0.1*symmetry_loss + 0.001 *normal_loss + 0.30 * beam_gap_loss# + 0.002 * curvature_loss# + 0.005*overlap_loss
+    # loss = stable_loss
 
     return loss.mean()
 
@@ -162,7 +165,7 @@ def training(**kwargs):
     BATCH_SIZE = kwargs['batch_size']
     CTRL_P_NUM = 4 # number of control points on one curve
     model = Model(tpl_params.repeat(BATCH_SIZE, 1, 1)).cuda()
-    optimizer = torch.optim.Adam(model.parameters(), kwargs['learning_rate'], betas=(0.5, 0.99))
+    optimizer = torch.optim.Adam(model.parameters(), kwargs['learning_rate'], betas=(0.9, 0.99))
     loop = tqdm(range(kwargs['epoch']))
     scheduler = LambdaLR(optimizer, lr_lambda)
 
@@ -200,7 +203,7 @@ def training(**kwargs):
 
         # record loss and learning rate
         with torch.no_grad():
-            loss_list.append(loss.cpu())
+            loss_list.append(loss.item())
             current_lr = optimizer.param_groups[0]['lr']
             lr_list.append(current_lr)
 
@@ -250,7 +253,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--epoch', type=int, default="201")
     parser.add_argument('--batch_size', type=int, default="1") # 不要改，就是1
-    parser.add_argument('--learning_rate', type=float, default="0.0005")
+    parser.add_argument('--learning_rate', type=float, default="0.0002")
 
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
     parser.add_argument('--k', type=int, default=3) # 裡curve採樣點最近的k個點
