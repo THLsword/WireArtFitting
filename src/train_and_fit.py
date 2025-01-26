@@ -96,23 +96,23 @@ def compute_loss(cp_coord, patches, curves, pcd_points, pcd_normals, pcd_area, p
     thres = 0.9
     beam_gap_loss = compute_beam_gap_loss(points, normals, pcd_points, thres)
     
-    # loss = chamfer_loss + 0.01*overlap_loss + 2*planar_loss + 0.1*symmetry_loss
-    stable_loss = chamfer_loss + 2.5*planar_loss + 0.1*symmetry_loss# + 0.012 * curvature_loss
-    if i <= 50:
-        loss = stable_loss + 0.2 * beam_gap_loss# + 0.012 * curvature_loss
-                # + 0.1 * math.exp(-i/100) * normal_loss
-                #+ 0.05 * mv_curve_loss 
-    elif i > 50 and i <= 100:
-        loss = stable_loss + 0.012 * curvature_loss + 0.1*normal_loss * math.exp((i-150)/100) + 0.2 * beam_gap_loss
-    else :
-        loss = stable_loss* math.exp((100-i)/100) +  0.1*normal_loss * math.exp((i-150)/100) + 0.2 * beam_gap_loss + 0.01*curvature_loss * math.exp((100-i)/100)
-                #+ math.exp((i-450)/100) * curve_chamfer_loss
-                #+ 0.05 * mv_curve_loss \
+    # # loss = chamfer_loss + 0.01*overlap_loss + 2*planar_loss + 0.1*symmetry_loss
+    # stable_loss = chamfer_loss + 2.5*planar_loss + 0.1*symmetry_loss# + 0.012 * curvature_loss
+    # if i <= 50:
+    #     loss = stable_loss + 0.2 * beam_gap_loss# + 0.012 * curvature_loss
+    #             # + 0.1 * math.exp(-i/100) * normal_loss
+    #             #+ 0.05 * mv_curve_loss 
+    # elif i > 50 and i <= 100:
+    #     loss = stable_loss + 0.012 * curvature_loss + 0.1*normal_loss * math.exp((i-150)/100) + 0.2 * beam_gap_loss
+    # else :
+    #     loss = stable_loss* math.exp((100-i)/100) +  0.1*normal_loss * math.exp((i-150)/100) + 0.2 * beam_gap_loss + 0.01*curvature_loss * math.exp((100-i)/100)
+    #             #+ math.exp((i-450)/100) * curve_chamfer_loss
+    #             #+ 0.05 * mv_curve_loss \
 
-    # # test loss
-    # # stable_loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss + normal_loss + 0.2 * beam_gap_loss
-    # stable_loss =  chamfer_loss + 2.0 *planar_loss + 0.1*symmetry_loss + 0.001 *normal_loss + 0.30 * beam_gap_loss# + 0.002 * curvature_loss# + 0.005*overlap_loss
-    # loss = stable_loss
+    # test loss
+    # stable_loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss + normal_loss + 0.2 * beam_gap_loss
+    stable_loss =  chamfer_loss + 2.0 *planar_loss + 0.1*symmetry_loss + 0.7 *normal_loss + 0.30 * beam_gap_loss# + 0.002 * curvature_loss# + 0.005*overlap_loss
+    loss = stable_loss
 
     return loss.mean()
 
