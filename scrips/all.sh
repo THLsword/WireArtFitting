@@ -1,8 +1,8 @@
 #!/bin/bash
 
-model_name='cat_noise'
+model_name='cat'
 # bench rocket
-output_filename=outputs/${model_name}
+output_filename=outputs_ICCV/${model_name}
 
 python src/preprocess.py \
 --DATA_DIR=./data/models/${model_name} \
@@ -13,12 +13,12 @@ python src/preprocess.py \
 --ALPHA_SIZE=30 \
 --EXPAND_SIZE=1 
 
-python src/train_and_fit.py  \
---model_path=./data/models/${model_name} \
---output_path=./${output_filename} \
---prep_output_path=./${output_filename}/prep_outputs/train_outputs \
---epoch=201 \
-# --template_path=./data/templates/cube24
+# python src/train_and_fit.py  \
+# --model_path=./data/models/${model_name} \
+# --output_path=./${output_filename} \
+# --prep_output_path=./${output_filename}/prep_outputs/train_outputs \
+# --epoch=201 \
+# # --template_path=./data/templates/cube24
 
 # python src/postprocess.py \
 # --model_path=./data/models/${model_name} \

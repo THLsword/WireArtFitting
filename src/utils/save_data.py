@@ -25,9 +25,9 @@ def save_obj(filename, points):
             # 格式化为OBJ文件中的顶点数据行
             file.write("v {} {} {}\n".format(*point))
 
-def save_loss_fig(loss_list, save_dir):
+def save_loss_fig(loss_list, save_dir, name='train_loss'):
     """
-    imput: list of losses
+    input: list of losses
     """
     plt.figure(figsize=(6,4))
     plt.plot(loss_list, label='Training Loss')
@@ -35,7 +35,7 @@ def save_loss_fig(loss_list, save_dir):
     plt.ylabel('Loss')
     plt.title('Training Loss')
     plt.legend()
-    plt.savefig(os.path.join(save_dir, 'train_loss.png'))
+    plt.savefig(os.path.join(save_dir, f'{name}.png'))
     plt.close()
 
 def save_lr_fig(lr_list, save_dir):

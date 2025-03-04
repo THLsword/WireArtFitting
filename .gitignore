@@ -2,8 +2,9 @@
 /test_files
 /data/Animal
 /data/exosk-data
-
+/data/models
 /IoU_eval/outputs
 graph.png
 /apes_src
 /preprocess_outputs
+/convexholl_test

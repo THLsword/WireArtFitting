@@ -7,7 +7,7 @@ import sys
 sys.path.insert(0, os.path.abspath(
 	os.path.join(os.path.dirname(__file__), '..')
 ))
-from ..utils.layers import Embedding, PcdEmbedding, N2PAttention, GlobalDownSample, LocalDownSample, DownSample_new, GlobalDownSample_more
+from ..utils.layers import Embedding, PcdEmbedding, N2PAttention, GlobalDownSample, LocalDownSample, DownSample_new
  
 class PcdBackbone(nn.Module):
     def __init__(self):

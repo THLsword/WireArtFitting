@@ -22,10 +22,11 @@ def area_weighted_chamfer_loss(
     distances, dis_to_center, gt_to_center = batched_cdist_l2(points, pcd_points, center_point) # distances [b, n_sample_points, n_mesh_points]
 
     # chamfer weights, The further away, the greater the weight
-    mean_dis = dis_to_center.mean(1) # [b] # dis_to_center [b, n_sample_points]
-    mean_gt_dis = gt_to_center.mean(1)     # gt_to_center  [b, n_mesh_points]
-    distance_weight    = (torch.max(torch.tensor(0.).to(mtds),(dis_to_center-mean_dis).unsqueeze(1)) * 0.2 + torch.ones_like(dis_to_center).to(dis_to_center)).detach()
-    distance_weight_gt = (torch.max(torch.tensor(0.).to(mtds),(gt_to_center-mean_gt_dis).unsqueeze(1)) * 0.2 + torch.ones_like(gt_to_center).to(gt_to_center)).detach()
+    mean_dis = dis_to_center.mean(1, keepdim=True) # [b, 1]
+    mean_gt_dis = gt_to_center.mean(1, keepdim=True) # gt_to_center  [b, 1]
+
+    distance_weight = (torch.max(torch.tensor(0.).to(mtds),(dis_to_center-mean_dis)) * 0.2 + torch.ones_like(dis_to_center).to(dis_to_center)).detach()
+    distance_weight_gt = (torch.max(torch.tensor(0.).to(mtds),(gt_to_center-mean_gt_dis)) * 0.2 + torch.ones_like(gt_to_center).to(gt_to_center)).detach()
 
     chamferloss_a, idx_a = distances.min(2)  # [b, n_sample_points]
     chamferloss_b, idx_b = distances.min(1)  # [b, n_mesh_points] 4096
@@ -56,6 +57,7 @@ def area_weighted_chamfer_loss(
     mtds = mtds.view(b, -1)
     chamferloss_a = torch.sum(mtds*chamferloss_a*distance_weight, dim=-1) / mtds.sum(-1) # [b]
     chamferloss_b = (chamferloss_b*distance_weight_gt).mean(1) # [b]
+
     # chamferloss_a = torch.sum(mtds*chamferloss_a, dim=-1) / mtds.sum(-1) # [b]
     # chamferloss_b = (chamferloss_b).mean(1) # [b]
     chamfer_loss = ((chamferloss_a+chamferloss_b).mean() / 2).view(1)
@@ -579,31 +581,38 @@ def curve_curvature_loss(curves, linspace):
 
 
 def compute_beam_gap_loss(points, normals, pcd_points, thres):
-    # view [b, n, 3]
+    # 將點和法向量的形狀調整為 [batch_size, n, 3]
     batch_size = points.shape[0]
     points = points.view(batch_size, -1, 3)
     normals = normals.view(batch_size, -1, 3)
-    # KNN
+    
+    # 使用 KNN 算法找到最近的點
     pk12 = knn_points(points, pcd_points, K=3).idx[0]
     pk21 = knn_points(pcd_points, points, K=3).idx[0]
+    
+    # 檢查點是否在彼此的 KNN 中
     loop = pk21[pk12].view(pk12.shape[0], -1)
     knn_mask = (loop == torch.arange(0, pk12.shape[0], device=points.device)[:, None]).sum(dim=1) > 0
 
+    # 過濾掉在彼此 KNN 中的點
     points = points[0]
     pcd_points = pcd_points[0]
     normals = normals[0]
-    normals = normals[~ knn_mask, :]
-    masked_points = points[~ knn_mask, :]
+    normals = normals[~knn_mask, :]
+    masked_points = points[~knn_mask, :]
+    
+    # 計算點之間的位移和距離
     displacement = masked_points[:, None, :] - pcd_points[:, :3]
     distance = displacement.norm(dim=-1)
 
-    # filter vectors with angles less than a threshold
+    # 過濾掉绝对余弦值小於閾值的向量
     mask = (torch.abs(torch.sum((displacement / distance[:, :, None]) * normals[:, None, :], dim=-1)) > thres)
     dmin, argmin = distance.min(dim=-1)
     distance_no_inf = distance.clone()
     distance_no_inf[~mask] = float('inf')
     dmin, argmin = distance_no_inf.min(dim=-1)
 
+    # 計算非無窮大的最小距離的平均值作為損失
     non_inf_mask = ~torch.isinf(dmin)
     loss = dmin[non_inf_mask].mean()
 

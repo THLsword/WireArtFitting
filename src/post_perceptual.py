@@ -1,5 +1,6 @@
 import os
 import tqdm
+from tqdm import tqdm
 import math
 import torch
 import torch.nn as nn
@@ -18,7 +19,6 @@ import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import psutil
 import gc
-from tqdm import tqdm
 import time
 
 from dataset.load_pcd import load_npz, load_obj
@@ -31,7 +31,6 @@ from utils.postprocess_utils import get_unique_curve, project_curve_to_pcd, dele
 from utils.create_mesh import create_mesh
 from utils.graph_utils import minimum_path_coverage
 from utils.save_data import save_img, save_obj, save_curves
-
 from model.model_interface import Model
 
 def create_bspline(mean_curve_points):
@@ -229,6 +228,7 @@ def training(**kwargs):
     # load nn model
     output_path = kwargs['output_path']
     model = torch.load(f"{output_path}/model_weights.pth").to(device)
+    model.eval()
 
     ################### post-porcessing #################
     ################### post-porcessing #################

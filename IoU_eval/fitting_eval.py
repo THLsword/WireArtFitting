@@ -1,6 +1,7 @@
 import os
 import tqdm
 import math
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,13 +14,15 @@ from PIL import Image
 from sklearn.decomposition import PCA
 import open3d
 from scipy.spatial.distance import cdist
-
-from dataset.load_pcd import load_npz, load_obj
-from dataset.load_template import load_template
-from utils.patch_utils import *
-from utils.losses import *
-from utils.curve_utils import * 
-from utils.mview_utils import multiview_sample, curve_probability
+sys.path.insert(0, os.path.abspath(
+	os.path.join(os.path.dirname(__file__), '..')
+))
+from src.dataset.load_pcd import load_npz, load_obj
+from src.dataset.load_template import load_template
+from src.utils.patch_utils import *
+from src.utils.losses import *
+from src.utils.curve_utils import * 
+from src.utils.mview_utils import multiview_sample, curve_probability
 
 def main(**kwargs):
     th = kwargs['th']
@@ -65,12 +68,12 @@ def main(**kwargs):
 
 
 if __name__ == '__main__':
-    model_name = 'rabbit'
+    model_name = 'rabbit_noise2'
     parser = argparse.ArgumentParser()
     parser.add_argument('--th', type=float, default=0.02)
 
     parser.add_argument('--model_path', type=str, default=f"data/models/{model_name}")
-    parser.add_argument('--output_path', type=str, default=f"outputs/{model_name}_6v")
+    parser.add_argument('--output_path', type=str, default=f"outputs/{model_name}")
     parser.add_argument('--template_path', type=str, default="data/templates/sphere24")
 
     args = parser.parse_args()

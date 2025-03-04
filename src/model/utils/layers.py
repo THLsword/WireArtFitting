@@ -128,9 +128,9 @@ class GlobalDownSample(nn.Module):
         out = rearrange(v, 'B M C -> B C M').contiguous()  # (B, M, C) -> (B, C, M)
         return out
 
-class GlobalDownSample_more(nn.Module):
+class GlobalDownSample_moreoutputs(nn.Module):
     def __init__(self, npts_ds):
-        super(GlobalDownSample_more, self).__init__()
+        super(GlobalDownSample_moreoutputs, self).__init__()
         self.npts_ds = npts_ds
         self.q_conv = nn.Conv1d(128, 128, 1, bias=False)
         self.k_conv = nn.Conv1d(128, 128, 1, bias=False)
