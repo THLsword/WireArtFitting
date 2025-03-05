@@ -66,6 +66,7 @@ def render(data):
     render curves and compute alphashape  
     inputs: dict ['bspline_remian', 'image_size', 'i: int', 'alpha_value', 'save_img: bool']  
     outputs: alphashape area and length
+    alpha_value越小，輪廓越大（細節越差）
     """
     rotated_pcd = data['bspline_remian']
     image_size = data['image_size']
@@ -93,15 +94,17 @@ def render(data):
     length = alpha_shape_pcd.length
 
     if save_img:
+        output_path = "render_results"
+        os.makedirs(output_path, exist_ok=True)
         # test & save image
         image = Image.fromarray((img*255).astype(np.uint8))
-        image.save(f"render{num}.png")
+        image.save(f"{output_path}/render{num}.png")
 
         # save polygon image
         image = Image.new("1", (image_size,image_size), 0)  # "1"表示二值化模式，0表示黑色
         draw = ImageDraw.Draw(image)
         draw.polygon(list(alpha_shape_pcd.exterior.coords), outline=1, fill=1)
-        image.save(f"polygon{num}.png")
+        image.save(f"{output_path}/polygon{num}.png")
 
     return area, length
 
@@ -197,7 +200,6 @@ def training(**kwargs):
 
     # multi-view points sample from pcd
     mv_mask = mview_weights_>0.5
-    print(mv_mask.sum())
     mv_points = multiview_sample(pcd_points, mview_weights_) # (M, 3)
 
     # load template
@@ -299,7 +301,7 @@ def training(**kwargs):
 
     data_list = []
     for i, value in enumerate(rotated_bsplines):
-        data_list.append({'bspline_remian':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':False})
+        data_list.append({'bspline_remian':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':True})
     with ProcessPoolExecutor(max_workers=len(rotate_matrix)) as executor:
         as_results = list(executor.map(render, data_list)) # list [(area,length),...,(area,length)]
     area_before_delet = [] # area before deleting
@@ -424,7 +426,7 @@ def training(**kwargs):
                 delete_idx = j
 
         if min_IOU_loss > mv_thresh and min_IOU_loss != 1:
-            print("min_IOU_loss > mv_thresh")
+            print("min_IOU_loss:", min_IOU_loss," > mv_thresh")
             break
         # graph delete & losses
         G = graph_delete_curve(G, delete_idx)
@@ -469,7 +471,7 @@ if __name__ == '__main__':
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
     parser.add_argument('--k', type=int, default=10) # 裡curve採樣點最近的k個點
     parser.add_argument('--match_rate', type=float, default=0.2) 
-    parser.add_argument('--alpha_value', type=float, default=0.3) 
+    parser.add_argument('--alpha_value', type=float, default=0.2) 
     parser.add_argument('--object_curve_num', type=float, default=25) 
     parser.add_argument('--mv_thresh', type=float, default=0.10)
     parser.add_argument('--crossattention', type=bool, default=True)

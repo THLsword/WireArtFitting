@@ -111,7 +111,7 @@ def compute_loss(cp_coord, patches, curves, pcd_points, pcd_normals, pcd_area, p
 
     # test loss
     # stable_loss = chamfer_loss + 2*planar_loss + 0.1*symmetry_loss + normal_loss + 0.2 * beam_gap_loss
-    stable_loss =  chamfer_loss + 2.0 *planar_loss + 0.1*symmetry_loss + 0.7 *normal_loss + 0.30 * beam_gap_loss# + 0.002 * curvature_loss# + 0.005*overlap_loss
+    stable_loss =  chamfer_loss + 2.5 * planar_loss + 0.1 * symmetry_loss + 0.7 * normal_loss + 0.30 * beam_gap_loss + 0.03 * curvature_loss# + 0.005*overlap_loss
     loss = stable_loss
 
     return loss.mean()
