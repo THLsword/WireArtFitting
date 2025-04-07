@@ -279,11 +279,13 @@ def training(**kwargs):
     # object_curve_num = int(total_curve_unm/1.7)
     object_curve_num = kwargs['object_curve_num']
 
-    pcd_feature = model.pcd_backbone(model.embedding_layer(pcd_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device))) #[1, 3, 4096] -> [1, 128, 4096]
-    mv_feature = model.prep_backbone(model.embedding_layer(mv_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+    # pcd_feature = model.pcd_backbone(model.embedding_layer(pcd_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device))) #[1, 3, 4096] -> [1, 128, 4096]
+    # mv_feature = model.prep_backbone(model.embedding_layer(mv_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+    feature_low, feature_high = model.forward_feature(pcd_points.repeat(batch_size, 1, 1).to(device), mv_points.repeat(batch_size, 1, 1).to(device))
+    pcd_feature = feature_high
 
-    if cross_attention:  
-        pcd_feature = model.upsample(pcd_feature, mv_feature)
+    # if cross_attention:  
+    #     pcd_feature = model.upsample(pcd_feature, mv_feature)
     # else:
     #     pcd_feature = model.upsample(pcd_feature, mv_feature)
     #     pcd_feature, _ = pcd_feature.max(dim = 2)
@@ -301,7 +303,7 @@ def training(**kwargs):
 
     data_list = []
     for i, value in enumerate(rotated_bsplines):
-        data_list.append({'bspline_remian':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':True})
+        data_list.append({'bspline_remian':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':False})
     with ProcessPoolExecutor(max_workers=len(rotate_matrix)) as executor:
         as_results = list(executor.map(render, data_list)) # list [(area,length),...,(area,length)]
     area_before_delet = [] # area before deleting
@@ -315,6 +317,8 @@ def training(**kwargs):
     curves_ramian = curve_cood_list.copy()
     area_global = np.array(area_before_delet) # global is the value before removing
     while True:
+        if object_curve_num == 48:
+            break
         delete_idx = []
         L2_losses = []
         L2_losses_all = np.ones(len(curve_cood_list))*100
@@ -363,10 +367,12 @@ def training(**kwargs):
             masked_mvpoints = masked_mvpoints[indices]
 
             # model inference
-            samplepcd_feature = model.pcd_backbone(model.embedding_layer(temp_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
-            samplepcd_mv_feature = model.prep_backbone(model.embedding_layer(masked_mvpoints.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
-            if cross_attention: 
-                samplepcd_feature = model.upsample(samplepcd_feature, samplepcd_mv_feature)
+            # samplepcd_feature = model.pcd_backbone(model.embedding_layer(temp_points.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+            # samplepcd_mv_feature = model.prep_backbone(model.embedding_layer(masked_mvpoints.repeat(batch_size, 1, 1).transpose(1, 2).to(device)))
+            sampled_feature_low, sampled_feature_high = model.forward_feature(temp_points.repeat(batch_size, 1, 1).to(device), masked_mvpoints.repeat(batch_size, 1, 1).to(device))
+            samplepcd_feature = sampled_feature_high
+            # if cross_attention: 
+            #     samplepcd_feature = model.upsample(samplepcd_feature, samplepcd_mv_feature)
             # else:
             #     samplepcd_feature, _ = samplepcd_feature.max(dim = 2)
 
@@ -376,8 +382,8 @@ def training(**kwargs):
                     min_L2_loss = L2_loss
                     delete_idx = j
                 L2_losses.append(L2_loss.to('cpu'))
-                for idx_temp in j:                    # 注釋這行，跳過計算IOU
-                    L2_losses_all[idx_temp] = L2_loss # 注釋這行，跳過計算IOU
+                # for idx_temp in j:                    # 注釋這行，跳過計算IOU
+                #     L2_losses_all[idx_temp] = L2_loss # 注釋這行，跳過計算IOU
 
         if len(L2_losses) == 0:
             print("no curve can be remove")
@@ -412,8 +418,14 @@ def training(**kwargs):
             data_list = []
             area_ad   = []
             length_ad = []
-            for i, value in enumerate(rotate_matrix):
-                data_list.append({'bspline_remian':bspline_remian, 'rotate_matrix':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':False})
+            # rotate bspline
+            rotated_bsplines = []
+            for mat in rotate_matrix:
+                transformed = bspline_remian @ mat.T
+                rotated_bsplines.append(transformed)
+            rotated_bsplines = np.stack(rotated_bsplines, axis=0)
+            for i, value in enumerate(rotated_bsplines):
+                data_list.append({'bspline_remian':value, 'image_size':image_size, 'i':i, 'alpha_value':alpha_value, 'save_img':False})
             with ProcessPoolExecutor(max_workers=len(rotate_matrix)) as executor:
                 as_results = list(executor.map(render, data_list))
             for as_result in as_results:
@@ -471,7 +483,7 @@ if __name__ == '__main__':
     parser.add_argument('--d_curve', type=bool, default=False) # 是否删掉不需要的curve
     parser.add_argument('--k', type=int, default=10) # 裡curve採樣點最近的k個點
     parser.add_argument('--match_rate', type=float, default=0.2) 
-    parser.add_argument('--alpha_value', type=float, default=0.2) 
+    parser.add_argument('--alpha_value', type=float, default=0.25) 
     parser.add_argument('--object_curve_num', type=float, default=25) 
     parser.add_argument('--mv_thresh', type=float, default=0.10)
     parser.add_argument('--crossattention', type=bool, default=True)

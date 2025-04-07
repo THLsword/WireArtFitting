@@ -1,6 +1,6 @@
 #!/bin/bash
 
-model_name='bottles4'
+model_name='rabbit'
 # bench rocket
 output_filename=outputs/${model_name}
 
@@ -13,12 +13,14 @@ python src/preprocess.py \
 --ALPHA_SIZE=30 \
 --EXPAND_SIZE=1 
 
-python src/train_and_fit.py  \
---model_path=./data/models/${model_name} \
---output_path=./${output_filename} \
---prep_output_path=./${output_filename}/prep_outputs/train_outputs \
---epoch=201 \
---template_path=./data/templates/cube24
+# python src/train_and_fit.py  \
+# --model_path=./data/models/${model_name} \
+# --output_path=./${output_filename} \
+# --prep_output_path=./${output_filename}/prep_outputs/train_outputs \
+# --epoch=201 \
+# --template_path=./data/templates/donut
+# --template_path=./data/templates/cup24
+# --template_path=./data/templates/cube24
 
 # python src/postprocess.py \
 # --model_path=./data/models/${model_name} \
